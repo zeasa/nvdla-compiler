@@ -9,6 +9,8 @@
 	https://blog.csdn.net/hywCogost/article/details/82114529
 ### 1.2.2.问题与解决 ###
 
+- ubuntu16.04编译会出现：“  undefined reference to google::protobuf::internal::empty_string_[abi:cxx11]   ”等链接错误，原因是ubuntu16.04默认安装的是GCC5，但是nvdla的sw部分应该是用的GCC5以下的版本，google上有人讲到：“  the ABI for std::string has changed in GCC 5(related to c++ 11 requirements, but it applies even if you aren't using c++ 11   ”，解决方法是：可以在g++的编译参数中加入 -D_GLIBCXX_USR_CXX11_ABI=0, 然后就解决了，具体修改文件是nvdla/sw/umd/core/src/compiler/Makefile 把上述的字符串加到MODULE_CPPFLAGS.....以后最末尾即可编译通过
+
 ## 1.3.软硬件分析文章参考 ##
 	https://github.com/JunningWu/Learning-NVDLA-Notes
 # 2.源代码结构 #
