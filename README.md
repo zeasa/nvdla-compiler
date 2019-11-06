@@ -9,7 +9,7 @@
 	https://github.com/JunningWu/Learning-NVDLA-Notes
 # 2.源代码结构#
 ## 2.1.hw目录结构##
-![](https://github.com/zeasa/nvdla-compiler-learning/document/imgs/hwfolderlist.png)
+![](https://github.com/zeasa/nvdla-compiler-learning/raw/master/document/imgs/hwfolderlist.png)
 
 - cmod是systemc模型用来仿真和vp
 - perf是性能计算excel表格
@@ -19,4 +19,4 @@
 - verif是仿真文件夹
 - vmod是verilog仿真模型和RTL代码
 ## 2.2.sw目录结构##
-![](https://github.com/zeasa/nvdla-compiler-learning/document/imgs/swfolderlist.png)
+![](https://github.com/zeasa/nvdla-compiler-learning/raw/master/document/imgs/swfolderlist.png)
