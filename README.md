@@ -53,9 +53,11 @@
 
 ​	nvdla的日志，在代码里默认都是关闭的，并且没有总体的开关，log开关都是分散在各个类的定义文件里。下面举个例子：
 
-![image-20191106151803859](https://github.com/zeasa/nvdla-compiler/raw/master/document/imgs/logswitch.png)
+![](https://github.com/zeasa/nvdla-compiler/raw/master/document/imgs/logswitch.png)
 
 上图中在Graph这个类里面，有许多的log日志开关，只需将红框中的false改为true就可以打开这个class的日志输出。类似的开关还有很多，需要在读到相关class部分代码的时候有需要的打开。以编译一个Lenet5的网络为例，输出的日志在10000行左右，这个log.txt在本repo的model&log文件夹里可以找到。
 
 ## 4.2.runtime部分 ##
 ## 4.4.compiler部分 ##
+
+### 4.4.1.总体概述
