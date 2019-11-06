@@ -7,7 +7,7 @@
 	https://blog.csdn.net/hywCogost/article/details/82114529
 # 2.源代码结构#
 ## 2.1.hw目录结构##
-![](https://github.com/zeasa/nvdla-compiler-learning/document/imgs/hwfolderlist.png)
+![](https://github.com/zeasa/nvdla-compiler/blob/master/document/imgs/hwfolderlist.png)
 
 - cmod是systemc模型用来仿真和vp
 - perf是性能计算excel表格
