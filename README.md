@@ -1,5 +1,5 @@
-# <font color="green" size = "8px" face="courier new"><center>**nvdla-compiler-learning**</center></font> #
-# <font color="blue">1.安装准备与一些有用的资源</font> #
+# nvdla-compiler-learning #
+# 1.安装准备与一些有用的资源 #
 ## 1.1.github地址 ##
 	https://github.com/nvdla
 ## 1.2.编译和安装 ##
@@ -10,7 +10,7 @@
 	
 ## 1.3.软硬件分析文章参考 ##
 	https://github.com/JunningWu/Learning-NVDLA-Notes
-# <font color="blue">2.源代码结构</font> #
+# 2.源代码结构 #
 ## 2.1.整体代码目录结构 ##
 ## 2.2.hw目录结构 ##
 ![](https://github.com/zeasa/nvdla-compiler/raw/master/document/imgs/hwfolderlist.png)
@@ -29,8 +29,8 @@
 - kmd接受umd的工作负载提交，并驱动硬件DLA执行计算任务
 - prebuild
 
-# <font color="blue">3.模型编译与DLA仿真运行</font> #
-# <font color="blue">4.深入源码</font> #
+# 3.模型编译与DLA仿真运行 #
+# 4.深入源码 #
 ## 4.1.总体结构 ##
 ## 4.2.runtime部分 ##
 ## 4.3.compiler部分 ##
