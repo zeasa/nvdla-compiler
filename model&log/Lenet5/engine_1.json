@@ -1,0 +1,459 @@
+{
+    "classname": "graph",
+    "id": "engine_1",
+    "filename": "engine_1.json",
+    "elements": [
+        {
+            "class": "edge",
+            "id": "e-9",
+            "type": "DATA",
+            "sources": [],
+            "targets": [
+                "dc-conv-0"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 0,
+                "fab_time": 0,
+                "fin_time": 0
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-0",
+            "type": "DATA",
+            "sources": [],
+            "targets": [
+                "dc-conv-0"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 0,
+                "fab_time": 0,
+                "fin_time": 0
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-10",
+            "type": "DATA",
+            "sources": [],
+            "targets": [
+                "bias-0"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 1,
+                "fab_time": 1,
+                "fin_time": 1
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-12",
+            "type": "DATA",
+            "sources": [],
+            "targets": [
+                "dc-conv-1"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 3,
+                "fab_time": 3,
+                "fin_time": 3
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-13",
+            "type": "DATA",
+            "sources": [],
+            "targets": [
+                "bias-1"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 4,
+                "fab_time": 4,
+                "fin_time": 4
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-15",
+            "type": "DATA",
+            "sources": [],
+            "targets": [
+                "fc-0"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 6,
+                "fab_time": 6,
+                "fin_time": 6
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-16",
+            "type": "DATA",
+            "sources": [],
+            "targets": [
+                "bias-2"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 7,
+                "fab_time": 7,
+                "fin_time": 7
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-20",
+            "type": "DATA",
+            "sources": [],
+            "targets": [
+                "fc-1"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 8,
+                "fab_time": 8,
+                "fin_time": 8
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-21",
+            "type": "DATA",
+            "sources": [],
+            "targets": [
+                "bias-3"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 9,
+                "fab_time": 9,
+                "fin_time": 9
+            }
+        },
+        {
+            "class": "node",
+            "id": "dc-conv-0",
+            "name": "n-0",
+            "className": "ConvolutionOpNode",
+            "score": {
+                "state": "3",
+                "dis_time": 0,
+                "fab_time": 0,
+                "fin_time": 0
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-11",
+            "type": "DATA",
+            "sources": [
+                "dc-conv-0"
+            ],
+            "targets": [
+                "bias-0"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 1,
+                "fab_time": 1,
+                "fin_time": 1
+            }
+        },
+        {
+            "class": "node",
+            "id": "bias-0",
+            "name": "n-1",
+            "className": "SDPBiasOpNode",
+            "score": {
+                "state": "3",
+                "dis_time": 1,
+                "fab_time": 1,
+                "fin_time": 1
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-1",
+            "type": "DATA",
+            "sources": [
+                "bias-0"
+            ],
+            "targets": [
+                "pdp-0"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 2,
+                "fab_time": 2,
+                "fin_time": 2
+            }
+        },
+        {
+            "class": "node",
+            "id": "pdp-0",
+            "name": "n-2",
+            "className": "PDPNode",
+            "score": {
+                "state": "3",
+                "dis_time": 2,
+                "fab_time": 2,
+                "fin_time": 2
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-2",
+            "type": "DATA",
+            "sources": [
+                "pdp-0"
+            ],
+            "targets": [
+                "dc-conv-1"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 3,
+                "fab_time": 3,
+                "fin_time": 3
+            }
+        },
+        {
+            "class": "node",
+            "id": "dc-conv-1",
+            "name": "n-3",
+            "className": "ConvolutionOpNode",
+            "score": {
+                "state": "3",
+                "dis_time": 3,
+                "fab_time": 3,
+                "fin_time": 3
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-14",
+            "type": "DATA",
+            "sources": [
+                "dc-conv-1"
+            ],
+            "targets": [
+                "bias-1"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 4,
+                "fab_time": 4,
+                "fin_time": 4
+            }
+        },
+        {
+            "class": "node",
+            "id": "bias-1",
+            "name": "n-4",
+            "className": "SDPBiasOpNode",
+            "score": {
+                "state": "3",
+                "dis_time": 4,
+                "fab_time": 4,
+                "fin_time": 4
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-3",
+            "type": "DATA",
+            "sources": [
+                "bias-1"
+            ],
+            "targets": [
+                "pdp-1"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 5,
+                "fab_time": 5,
+                "fin_time": 5
+            }
+        },
+        {
+            "class": "node",
+            "id": "pdp-1",
+            "name": "n-5",
+            "className": "PDPNode",
+            "score": {
+                "state": "3",
+                "dis_time": 5,
+                "fab_time": 5,
+                "fin_time": 5
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-4",
+            "type": "DATA",
+            "sources": [
+                "pdp-1"
+            ],
+            "targets": [
+                "fc-0"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 6,
+                "fab_time": 6,
+                "fin_time": 6
+            }
+        },
+        {
+            "class": "node",
+            "id": "fc-0",
+            "name": "n-6",
+            "className": "FullyConnectedOpNode",
+            "score": {
+                "state": "3",
+                "dis_time": 6,
+                "fab_time": 6,
+                "fin_time": 6
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-17",
+            "type": "DATA",
+            "sources": [
+                "fc-0"
+            ],
+            "targets": [
+                "bias-2"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 7,
+                "fab_time": 7,
+                "fin_time": 7
+            }
+        },
+        {
+            "class": "node",
+            "id": "bias-2",
+            "name": "n-7",
+            "className": "SDPBiasOpNode",
+            "score": {
+                "state": "3",
+                "dis_time": 7,
+                "fab_time": 7,
+                "fin_time": 7
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-6",
+            "type": "DATA",
+            "sources": [
+                "bias-2"
+            ],
+            "targets": [
+                "fc-1"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 8,
+                "fab_time": 8,
+                "fin_time": 8
+            }
+        },
+        {
+            "class": "node",
+            "id": "fc-1",
+            "name": "n-10",
+            "className": "FullyConnectedOpNode",
+            "score": {
+                "state": "3",
+                "dis_time": 8,
+                "fab_time": 8,
+                "fin_time": 8
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-22",
+            "type": "DATA",
+            "sources": [
+                "fc-1"
+            ],
+            "targets": [
+                "bias-3"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 9,
+                "fab_time": 9,
+                "fin_time": 9
+            }
+        },
+        {
+            "class": "node",
+            "id": "bias-3",
+            "name": "n-11",
+            "className": "SDPBiasOpNode",
+            "score": {
+                "state": "3",
+                "dis_time": 9,
+                "fab_time": 9,
+                "fin_time": 9
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-7",
+            "type": "DATA",
+            "sources": [
+                "bias-3"
+            ],
+            "targets": [
+                "cpu-sm-0"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 10,
+                "fab_time": 10,
+                "fin_time": 10
+            }
+        },
+        {
+            "class": "node",
+            "id": "cpu-sm-0",
+            "name": "n-12",
+            "className": "CPUSoftMaxOpNode",
+            "score": {
+                "state": "3",
+                "dis_time": 10,
+                "fab_time": 10,
+                "fin_time": 10
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-8",
+            "type": "DATA",
+            "sources": [
+                "cpu-sm-0"
+            ],
+            "targets": [],
+            "score": {
+                "state": "3",
+                "dis_time": 11,
+                "fab_time": 11,
+                "fin_time": 11
+            }
+        }
+    ]
+}

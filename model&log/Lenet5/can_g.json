@@ -1,0 +1,235 @@
+{
+    "classname": "graph",
+    "id": "canonical_graph",
+    "filename": "can_g.json",
+    "elements": [
+        {
+            "class": "edge",
+            "id": "e-0",
+            "sources": [],
+            "targets": [
+                "n-0"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 0,
+                "fab_time": 0,
+                "fin_time": 0
+            }
+        },
+        {
+            "class": "node",
+            "id": "n-0",
+            "className": "ConvolutionNode",
+            "score": {
+                "state": "3",
+                "dis_time": 0,
+                "fab_time": 0,
+                "fin_time": 0
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-1",
+            "sources": [
+                "n-0"
+            ],
+            "targets": [
+                "n-1"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 1,
+                "fab_time": 1,
+                "fin_time": 1
+            }
+        },
+        {
+            "class": "node",
+            "id": "n-1",
+            "className": "PoolingNode",
+            "score": {
+                "state": "3",
+                "dis_time": 1,
+                "fab_time": 1,
+                "fin_time": 1
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-2",
+            "sources": [
+                "n-1"
+            ],
+            "targets": [
+                "n-2"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 2,
+                "fab_time": 2,
+                "fin_time": 2
+            }
+        },
+        {
+            "class": "node",
+            "id": "n-2",
+            "className": "ConvolutionNode",
+            "score": {
+                "state": "3",
+                "dis_time": 2,
+                "fab_time": 2,
+                "fin_time": 2
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-3",
+            "sources": [
+                "n-2"
+            ],
+            "targets": [
+                "n-3"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 3,
+                "fab_time": 3,
+                "fin_time": 3
+            }
+        },
+        {
+            "class": "node",
+            "id": "n-3",
+            "className": "PoolingNode",
+            "score": {
+                "state": "3",
+                "dis_time": 3,
+                "fab_time": 3,
+                "fin_time": 3
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-4",
+            "sources": [
+                "n-3"
+            ],
+            "targets": [
+                "n-4"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 4,
+                "fab_time": 4,
+                "fin_time": 4
+            }
+        },
+        {
+            "class": "node",
+            "id": "n-4",
+            "className": "FullyConnectedNode",
+            "score": {
+                "state": "3",
+                "dis_time": 4,
+                "fab_time": 4,
+                "fin_time": 4
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-5",
+            "sources": [
+                "n-4"
+            ],
+            "targets": [
+                "n-5"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 5,
+                "fab_time": 5,
+                "fin_time": 5
+            }
+        },
+        {
+            "class": "node",
+            "id": "n-5",
+            "className": "ActivationNode",
+            "score": {
+                "state": "3",
+                "dis_time": 5,
+                "fab_time": 5,
+                "fin_time": 5
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-6",
+            "sources": [
+                "n-5"
+            ],
+            "targets": [
+                "n-6"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 6,
+                "fab_time": 6,
+                "fin_time": 6
+            }
+        },
+        {
+            "class": "node",
+            "id": "n-6",
+            "className": "FullyConnectedNode",
+            "score": {
+                "state": "3",
+                "dis_time": 6,
+                "fab_time": 6,
+                "fin_time": 6
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-7",
+            "sources": [
+                "n-6"
+            ],
+            "targets": [
+                "n-7"
+            ],
+            "score": {
+                "state": "3",
+                "dis_time": 7,
+                "fab_time": 7,
+                "fin_time": 7
+            }
+        },
+        {
+            "class": "node",
+            "id": "n-7",
+            "className": "SoftMaxNode",
+            "score": {
+                "state": "3",
+                "dis_time": 7,
+                "fab_time": 7,
+                "fin_time": 7
+            }
+        },
+        {
+            "class": "edge",
+            "id": "e-8",
+            "sources": [
+                "n-7"
+            ],
+            "targets": [],
+            "score": {
+                "state": "3",
+                "dis_time": 8,
+                "fab_time": 8,
+                "fin_time": 8
+            }
+        }
+    ]
+}
