@@ -125,10 +125,14 @@ layer {
 
 ​	最后一步就是根据变换和优化之后的EngineAST数据结构进行代码生成。这个阶段最终要的一项工作就是要解决tensor内存分配的问题，这个工作在memroyResolver阶段完成。
 
-### 4.3.2.代码流程分析-前端caffe模型到CanonicalAST表示
+### 4.3.2.compiler总体执行流程
 
-### 4.3.3.CanonicalAST到EngineAST表示
+![](https://github.com/zeasa/nvdla-compiler/raw/master/document/imgs/compiler_flowchart.png)
 
-### 4.3.4.EngineAST中间IR变换与优化PASS
+### 4.3.3.代码流程分析-前端caffe模型到CanonicalAST表示
 
-### 4.3.4.EngineAST到后端代码Emit（代码生成）
+### 4.3.4.CanonicalAST到EngineAST表示
+
+### 4.3.5.EngineAST中间IR变换与优化PASS
+
+### 4.3.6.EngineAST到后端代码Emit（代码生成）
