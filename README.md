@@ -146,11 +146,202 @@ layer {
    ```
    从命令函参数可以看出，目前nvdla的compiler只支持caffe模型，量化精度支持INT8和fp16，并且可以支持multibatch
 
-2. launchTest()
+2. launchTest()这个函数调用testSetup函数，根据appArgs结构体，填充testInfo结构体，并以testInfo结构体为参数调用parseAndCompile()函数
 
-3. testSetup(), parseAndCompiler()
+   ```c
+   TestInfo testInfo;
+   PROPAGATE_ERROR_FAIL(testSetup(appArgs, &testInfo));
+   PROPAGATE_ERROR_FAIL(parseAndCompile(appArgs, &testInfo));
+   ```
+   这里涉及到两个重要的结构体TestAppArgs和TestInfo
 
-4. parseCaffeNetwork()
+   ```c
+   struct TestAppArgs
+   {
+       std::string inputPath;
+       std::string inputName;
+       std::string loadableName;
+       NvS32 serverPort;
+       NvU8 normalize_value;
+       float mean[4];
+       bool rawOutputDump;
+   };
+   struct TestInfo
+   {
+       // runtime
+       nvdla::IRuntime* runtime;
+       std::string inputLoadablePath;
+       NvU8 *inputHandle;
+       NvU8 *outputHandle;
+       NvU8 *pData;
+       bool dlaServerRunning;
+       NvS32 dlaRemoteSock;
+       NvS32 dlaServerSock;
+       NvU32 numInputs;
+       NvU32 numOutputs;
+       NvDlaImage* inputImage;
+       NvDlaImage* outputImage;
+   };
+   ```
+
+3. testSetup()：主要是检查输入输出文件路径有效性，删除前一次编译中间文件，新建新一次编译中间文件夹
+
+   ```c++
+   NvDlaError testSetup(const TestAppArgs* appArgs, TestInfo* i)
+   {
+       NvDlaError e = NvDlaSuccess;
+       std::string wisdomPath = appArgs->outputPath + "wisdom.dir/";
+       std::string removeCmd = "";
+       std::string imagePath = "";
+       NvDlaStatType stat;
+       int ii = 0;
+   
+       // Do input paths exist?
+       e = NvDlaStat(appArgs->inputPath.c_str(), &stat);
+       if (e != NvDlaSuccess)
+           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Input path does not exist: \"%s\"", appArgs->inputPath.c_str());
+   
+       // Do output paths exist?
+       e = NvDlaStat(appArgs->outputPath.c_str(), &stat);
+       if (e != NvDlaSuccess)
+           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Output path does not exist: \"%s\"", appArgs->outputPath.c_str());
+   
+       // Clear wisdomPath if any exist
+       removeCmd += "rm -rf " + wisdomPath;
+       ii = std::system(removeCmd.c_str()); // This is pretty awful
+       if (ii != 0)
+           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "system command failed: \"%s\"", removeCmd.c_str());
+   
+       PROPAGATE_ERROR_FAIL(NvDlaMkdir(const_cast<char *>(wisdomPath.c_str())));
+   
+       // Initialize TestInfo
+       i->wisdom = NULL;
+       i->wisdomPath = wisdomPath;
+       i->pData = NULL;
+   
+       return NvDlaSuccess;
+   fail:
+       return e;
+   }
+   ```
+
+   parseAndCompiler()函数：
+
+   ```c++
+   NvDlaError parseAndCompile(const TestAppArgs* appArgs, TestInfo* i)
+   {
+       NvDlaError e = NvDlaSuccess;
+       bool isCaffe = appArgs->caffemodel != "";
+   
+       PROPAGATE_ERROR_FAIL(parseSetup(appArgs, i));//这个函数为空，直接返回OK
+   
+       NvDlaDebugPrintf("creating new wisdom context...\n");
+       i->wisdom = nvdla::createWisdom();//建立编译环境，这里这个wisdom是一个接口类，工厂类和工厂模式应用
+       if (!i->wisdom)
+           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "createWisdom() failed");
+   
+       NvDlaDebugPrintf("opening wisdom context...\n");
+       if (!i->wisdom->open(i->wisdomPath))
+           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "wisdom->open() failed to open: \"%s\"", i->wisdomPath.c_str());
+   
+       // Parse，这里这个函数负责parse caffemodel的两个输入文件
+       if (isCaffe)
+           PROPAGATE_ERROR_FAIL(parseCaffeNetwork(appArgs, i));
+       else
+           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Unknown network type encountered");
+   
+       // Compile
+       PROPAGATE_ERROR_FAIL(compileProfile(appArgs, i));
+   
+       /* Destroy network before closing wisdom context */
+       nvdla::destroyNetwork(i->wisdom->getNetwork());
+   
+       NvDlaDebugPrintf("closing wisdom context...\n");
+       i->wisdom->close();
+   fail:
+       if (i->wisdom != NULL) {
+           nvdla::destroyWisdom(i->wisdom);
+           i->wisdom = NULL;
+       }
+       return e;
+   }
+   ```
+
+4. parseCaffeNetwork()：这个函数负责解析命令行传递的编译输入model文件，包括prototxt和caffemodel，前者主要定义网络的结构和参数，后者包含train好的网络的weight和bias参数值，这里只贴出这个函数最重要的部分：
+
+   ```c++
+   static NvDlaError parseCaffeNetwork(const TestAppArgs* appArgs, TestInfo* i)
+   {
+       NvDlaError e = NvDlaSuccess;
+       nvdla::INetwork* network = NULL;
+       const nvdla::caffe::IBlobNameToTensor* b = NULL;
+       nvdla::caffe::ICaffeParser* parser = nvdla::caffe::createCaffeParser();
+       std::string caffePrototxtFile = appArgs->prototxt.c_str();//caffe模型的prototxt文件
+       std::string caffeModelFile = appArgs->caffemodel.c_str();//caffe模型的caffemodel文件，blob格式
+   	
+       //这里创建网络的内存表示，主要涉及INetwork接口类和Network实现类，这里network的create使用了工厂模式
+       network = nvdla::createNetwork();
+       if (!network)
+           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "createNetwork() failed");
+   	
+       //parser->parse()函数负责caffe模型的解析，传递的参数是caffe模型的两个文件，输出是network类和IBlobNameTOTensor两个
+       NvDlaDebugPrintf("parsing caffe network...\n");
+       b = parser->parse(caffePrototxtFile.c_str(), caffeModelFile.c_str(), network);
+       if (!b)
+           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Unable to parse caffemodel: \"%s\"", caffePrototxtFile.c_str());
+   }
+   ```
+
+   这个函数涉及了两个重要的数据结构：INetwork和Network，这里列出这两个数据结构的主要部分
+
+   ```c++
+   class INetwork
+   {
+   public:
+       virtual ITensor* addInput(const char * name, Dims4 dimensions) = 0;
+   
+       //指定网络的Input和Output Tensor
+       virtual bool markInput(ITensor * tensor) = 0;
+       virtual void markOutput(ITensor * tensor) = 0;
+   	
+       //构建网络的API函数，理论上通过以下这组add函数，就可以不使用caffe模型，手工的创建一个网络，类似大多数框架提供的网络构造API函数，但NVDLA似乎没有对外开放这组接口用于手工构造网络，TVM框架就对望开放了这组接口
+       virtual IConvolutionLayer *    addConvolution   (ITensor * input, int numOutputs, int paddingValue, Dims2 kernelSize,  Dims2 tlPadding, Dims2 brPadding, Dims2 stride, Dims2 dilation,
+   Weights kernelWeights, Weights biasWeights, BiasMode biasMode, int numGroups) = 0;
+       virtual IFullyConnectedLayer * addFullyConnected(ITensor * input, int outputSize, Weights kernelWeights, Weights biasWeights, BiasMode biasMode) = 0;
+       virtual IActivationLayer *     addActivation    (ITensor * input, ActivationType type) = 0;
+       virtual IPoolingLayer *        addPooling       (ITensor * input, PoolingType type,
+    Dims2 windowSize, Dims2 stride, Dims2 tlPadding, Dims2 brPadding) = 0;
+       virtual ILRNLayer *            addLRN           (ITensor * input, int window, float alpha, float beta, float k) = 0;
+       virtual IScaleLayer *          addScale         (ITensor * input, ScaleMode mode, Weights shift, Weights scale, Weights power) = 0;
+       virtual IBatchNormLayer *      addBatchNorm     (ITensor * input, BatchNormMode mode, Weights mean, Weights variance, float epsilon) = 0;
+       virtual ISoftMaxLayer *        addSoftMax       (ITensor*input) = 0;
+       virtual IConcatenationLayer *  addConcatenation (ITensor*const*inputs, int numInputs) = 0;
+       virtual ISliceLayer *          addSlice         (ITensor*input, int numOutputs) = 0;
+       virtual IDeconvolutionLayer *  addDeconvolution (ITensor * input, int numOutputs, int paddingValue, Dims2 kernelSize, Dims2 tlPadding, Dims2 brPadding, Dims2 stride, Dims2 dilation,
+   Weights kernelWeights, Weights biasWeights, BiasMode biasMode, int numGroups) = 0;
+       virtual IElementWiseLayer   *  addElementWise   (ITensor *input0, ITensor* input1, ElementWiseOperation op) = 0;
+   
+       virtual int getNumInputs()  const  = 0;
+       virtual int getNumOutputs() const  = 0;
+       virtual int getNumLayers()  const  = 0;
+       virtual ILayer  * getLayer(int index)  const = 0;
+       virtual ITensor * getOutput(int index) const = 0;
+       virtual ITensor * getInput(int index)  const = 0;
+       virtual void setPoolingOutputDimensionsFormula      (OutputDimensionsFormula* callback) = 0;
+       virtual void setConvolutionOutputDimensionsFormula  (OutputDimensionsFormula* callback) = 0;
+       virtual void setDeconvolutionOutputDimensionsFormula(OutputDimensionsFormula* callback) = 0;
+       virtual OutputDimensionsFormula& getPoolingOutputDimensionsFormula()       const = 0;
+       virtual OutputDimensionsFormula& getConvolutionOutputDimensionsFormula()   const = 0;
+       virtual OutputDimensionsFormula& getDeconvolutionOutputDimensionsFormula() const = 0;
+       virtual const std::vector<ITensor *> & getInputs()  const = 0;
+       virtual const std::vector<ILayer * > & getLayers()  const = 0;
+       virtual const std::vector<ITensor *> & getOutputs() const = 0;
+   };
+   ```
+
+   INetwork接口类是一个纯虚类，仅作接口使用，不可以被实例化，可以被继承，这个接口是NVDLA所谓的中间IR的入口。
+
+   parseCaffeNetwork()函数调用了createNetwork()函数创建了一个Network的实例，这里使用了类工厂模式。
 
 5. compile()
 
