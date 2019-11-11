@@ -127,11 +127,38 @@ layer {
 
 ### 4.3.2.compiler执行流程
 
-#### compiler总体flowchart
-
 ![](https://github.com/zeasa/nvdla-compiler/raw/master/document/imgs/compiler_flowchart.png)
 
-1. main()函数是compiler的入口，主要功能是处理compiler命令行参数以及调用launchTest()
+1. main()函数是compiler的入口，主要功能是处理compiler命令行参数以及调用launchTest()，下表列出命令行参数
+
+   ```
+   Usage: %s [-options] --prototxt <prototxt_file> --caffemodel <caffemodel_file>
+   where options include:
+   -h                                              print this help message
+   -o <outputpath>                                 outputs wisdom files in 'outputpath' directory
+   --profile <basic|default|performance|fast-math> computation profile (default: fast-math)
+   --cprecision <fp16|int8>                          compute precision (default: fp16)
+   --configtarget <opendla-full|opendla-large|opendla-small>   target platform (default: nv_full)
+   --calibtable <int8 calib file>                  calibration table for INT8 networks (default: 0.00787)
+   --quantizationMode <per-kernel|per-filter>      quantization mode for INT8 (default: per-kernel)
+   --batch                                           batch size (default: 1)
+   --informat <ncxhwx|nchw|nhwc>                     input data format (default: nhwc)
+   ```
+   从命令函参数可以看出，目前nvdla的compiler只支持caffe模型，量化精度支持INT8和fp16，并且可以支持multibatch
+
+2. launchTest()
+
+3. testSetup(), parseAndCompiler()
+
+4. parseCaffeNetwork()
+
+5. compile()
+
+6. compilerInternal()
+
+7. compilerInternal()
+
+8. generateGraph(), generateGraph(), emit()
 
 ### 4.3.3.代码流程分析-前端caffe模型到CanonicalAST表示
 
