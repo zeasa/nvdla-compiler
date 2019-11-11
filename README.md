@@ -24,7 +24,22 @@
   cp tmp/include/* ./
   rm -rf tmp
   ```
-
+- **$ cmake部分出现-Could NOT find Lua**
+ ``` -- Searching for SystemC
+-- SystemC version = 2.3.0
+-- SystemC library = /usr/local/systemc-2.3.0/lib-linux64/libsystemc.so
+-- Searching for TLM
+running ls /usr/local/systemc-2.3.0/include/tlm.h 2>&1
+/usr/local/systemc-2.3.0/include/tlm.h
+-- TLM library = /usr/local/systemc-2.3.0/include/tlm.h
+CMake Error at /usr/share/cmake-3.10/Modules/FindPackageHandleStandardArgs.cmake:137 (message):
+  Could NOT find Lua (missing: LUA_LIBRARIES LUA_INCLUDE_DIR)
+Call Stack (most recent call first):
+  /usr/share/cmake-3.10/Modules/FindPackageHandleStandardArgs.cmake:378 (_FPHSA_FAILURE_MESSAGE)
+  cmake/FindLua.cmake:113 (FIND_PACKAGE_HANDLE_STANDARD_ARGS)
+  CMakeLists.txt:55 (find_package)
+  ```
+  原因是缺少Lua5.2相关脚本环境。$ sudo apt-get install liblua5.2即可。
   
 
 ## 1.3.软硬件分析文章参考 ##
