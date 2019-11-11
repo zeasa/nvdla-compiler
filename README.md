@@ -296,7 +296,7 @@ layer {
    }
    ```
 
-   这个函数涉及了两个重要的数据结构：INetwork和Network，这里列出这两个数据结构的主要部分
+   对于caffemodel的具体解析在parse()函数里实现，后面章节会具体的详解，这个函数涉及了两个重要的数据结构：INetwork和Network，这里列出这两个数据结构的主要部分
 
    ```c++
    class INetwork
@@ -337,6 +337,7 @@ layer {
        virtual OutputDimensionsFormula& getPoolingOutputDimensionsFormula()       const = 0;
        virtual OutputDimensionsFormula& getConvolutionOutputDimensionsFormula()   const = 0;
        virtual OutputDimensionsFormula& getDeconvolutionOutputDimensionsFormula() const = 0;
+       //注意这三个接口函数，获取Network的输入tensors、输出tensors和层，返回是vector
        virtual const std::vector<ITensor *> & getInputs()  const = 0;
        virtual const std::vector<ILayer * > & getLayers()  const = 0;
        virtual const std::vector<ITensor *> & getOutputs() const = 0;
@@ -345,9 +346,189 @@ layer {
 
    INetwork接口类是一个纯虚类，仅作接口使用，不可以被实例化，可以被继承，这个接口是NVDLA所谓的中间IR的入口。parseCaffeNetwork()函数调用了createNetwork()函数创建了一个Network的实例，这里使用了类工厂模式。
 
+   ```c++
+   INetwork *createNetwork()
+   {
+       priv::NetworkFactory::NetworkPrivPair n = priv::NetworkFactory::newNetwork();
+       return n.i();
+   }
+   
+   class NetworkFactory
+   {
+   public:
+       typedef PrivPair<INetwork *, Network*> NetworkPrivPair;
+   	
+       //类工厂模式，注意，以下这些函数必须是static类型
+       static NetworkPrivPair newNetwork();
+       static NvDlaError deleteNetwork(INetwork *network);
+   
+       static Network *priv(INetwork *);//通过INetwork查找关联的Network
+       static INetwork *i(Network *); //通过Network查找关联的INetwork
+       static INetwork *self(void *s);
+   
+       static INetwork *deserializeFrom(WisdomContainerEntry *);
+   
+   protected:
+       static BiMap<INetwork *, Network *> s_priv; //BiMap双向映射数据结构方便前后两个数据相互查找
+       static BiMap<void *, INetwork *> s_self; //BiMap双向映射数据结构
+   
+       static INetwork *deserializeNetwork(WisdomContainerEntry *);
+   };
+   NetworkFactory::NetworkPrivPair NetworkFactory::newNetwork()
+   {
+       INetwork *network;
+       Network *network_priv;
+       network = network_priv = new priv::Network();//实际创建的是Network类型
+       if (network) {
+           s_priv.insert(network, network_priv);
+           s_self.insert(network, network);
+       }
+       return NetworkPrivPair(network, network_priv);
+   }
+   
+   // PrivPair and PrivDiamond simplify management of the pointers necessary
+   // to track public interfaces, their private implementations and derivations
+   // of such which result in a diamond inheritance pattern.  These are simply
+   // fancy 2 and 4-tuples implemented by std::pair and 2x same.
+   // Note: with RTTI enabled this can all disappear as dynamic_cast<>()
+   // would be available instead ;(
+   //这个模板类实现了一个Interface类和他的一个具体实现之间相互关联的数据结构，这么做应该是为了
+   //实现RTTI功能
+   template <typename I, typename P>
+   class PrivPair
+   {
+   public:
+       typedef I InterfaceType;
+       typedef P PrivateType;
+   
+       PrivPair() : m_i_priv(0, 0) { }
+       PrivPair(I i, P priv) :
+           m_i_priv(i, priv) { }
+       PrivPair(const PrivPair &p) :
+           m_i_priv(p.m_i_priv) { }
+       inline bool operator !() const { return (!m_i_priv.first) || (!m_i_priv.second); }
+       inline bool operator ==(const PrivPair &rhs) const { return m_i_priv == rhs.m_i_priv; }
+       inline bool operator <(const PrivPair &rhs) const { return m_i_priv < rhs.m_i_priv; }
+       inline I i() const      { return m_i_priv.first;  }
+       inline P priv() const   { return m_i_priv.second; }
+   protected:
+       std::pair<I, P> m_i_priv;
+   };
+   ```
+
 5. compile()
 
+   ```c++
+   //这个函数接受的参数包括，profileName，targetConfigName，ILoadable双重指针
+   NvDlaError Compiler::compile(const char *tp_name, const char *target_config_name, ILoadable **peli)
+   {
+       NvDlaError e = NvDlaSuccess;
+       //调用compileInternal()函数完成实际编译工作
+       CATCH_PROPAGATE_ERROR_FAIL(
+           compileInternal(tp_name, target_config_name, peli, true /*full compile*/)
+       );
+   fail:
+       return e;
+   }
+   ```
+
+   这个函数实际调用了compileInternal()函数完成实际编译工作，但涉及到了一个重要的数据接口类:ILoabable
+
+   ```c++
+   class ILoadable
+   {
+   public:
+       enum Interface;
+       enum MemoryDomain;
+       enum MemoryFlags;
+       enum EventOp;
+       
+       //以下这些struct定义了loadable文件中的一系列重要的数据结构，
+       //compiler的核心功能就是把模型编译成下面这些数据结构存入loadable文件
+       //runtime的核心功能就是从loadable中解析如下数据结构并提交硬件进行计算
+       struct Version;
+       struct MemoryListEntry;
+       struct EventListEntry;
+       struct TaskListEntry;
+       struct SubmitListEntry;
+       struct AddressListEntry;
+       struct TensorDescListEntry;
+       struct RelocEntry;
+       struct Blob;
+   
+       virtual std::string getName() const = 0;
+       
+       virtual int getNumMemoryListEntries() const = 0;
+       virtual MemoryListEntry getMemoryListEntry(NvU16 mem_id) const = 0;
+       
+       virtual int getNumEventListEntries() const = 0;
+       virtual EventListEntry getEventListEntry(NvU16 event_id) const = 0;
+       
+       virtual int getNumTaskListEntries() const = 0;
+       virtual TaskListEntry getTaskListEntry(NvU16 task_id) const = 0;
+       
+       virtual int getNumAddressListEntries() const = 0;
+       virtual AddressListEntry getAddressListEntry(NvU16 i) const = 0;
+       
+       virtual int getNumTensorDescListEntries() const = 0;
+       virtual TensorDescListEntry getTensorDescListEntry(NvU16 i) const = 0;
+       
+       virtual NvDlaError getNetworkDataType(DataType::UnderlyingType *) const = 0;
+       
+       virtual NvDlaError getNumInputTensors(int *) const = 0;
+       virtual NvDlaError getInputTensorDesc(NvU16 id, ILoadable::TensorDescListEntry *) const = 0;
+       
+       virtual NvDlaError getNumOutputTensors(int *) const = 0;
+       virtual NvDlaError getOutputTensorDesc(NvU16 id, ILoadable::TensorDescListEntry *) const = 0;
+   protected:
+       ILoadable();
+       virtual ~ILoadable();
+   };
+   ```
+
+   在ILoadable接口中列出的一系列struct很重要，穿插在整个compiler工作的各个环节，后面会专门整理出来。
+
 6. compilerInternal()
+
+   第一层compilerInternal()函数，接收compiler函数传递过来的profile_name和target_config_name字符串，把这两个参数转换成Profile对象和TargetConfig对象，便于下一层compilerInternal函数使用：
+
+   ```c++
+   NvDlaError Compiler::compileInternal(const char *tp_name, const char *target_config_name, ILoadable **peli, bool fullCompile)
+   {
+       NvDlaError e = NvDlaSuccess;
+       Profiler *profiler = 0;
+       ProfileFactory::ProfilePrivPair p_profile;
+       Profile *profile = 0;
+       TargetConfig *target_config = 0;
+       vector<engine_ast::Graph *> g;
+   
+       if ( !m_wisdom ) ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "No wisdom available.");
+   
+       profiler = ProfilerFactory::priv(m_wisdom->getProfiler());
+       if ( !profiler ) ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "No profiler available.");
+   
+       //将tp_name字符串参数转换成Profile对象
+       profile = ProfileFactory::priv(profiler->getProfile(tp_name));
+       if ( !profile )
+       {
+           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Couldn't find profile to compile.");
+       }
+   	//将target_config_name字符串参数转换成TargetConfig对象
+       target_config = TargetConfigFactory::priv(profiler->getTargetConfig(target_config_name));
+       if ( !target_config )
+       {
+           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Couldn't find target config to compile.");
+       }
+   	//调用重载的compileInternal()执行下一步编译，这里参数已经是profile和target_config对象了
+       PROPAGATE_ERROR_FAIL( compileInternal(profile, target_config, peli, fullCompile) );
+   fail:
+       return e;
+   }
+   ```
+
+   上述代码涉及到两个重要的数据结构，Profile和TargetConfig类：
+
+   
 
 7. compilerInternal()
 
