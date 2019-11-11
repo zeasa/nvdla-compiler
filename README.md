@@ -1,5 +1,9 @@
 # nvdla-compiler-learning #
 
+[TOC]
+
+
+
 # 1.安装准备与一些有用的资源 #
 ## 1.1.github地址 ##
 	https://github.com/nvdla
@@ -339,9 +343,7 @@ layer {
    };
    ```
 
-   INetwork接口类是一个纯虚类，仅作接口使用，不可以被实例化，可以被继承，这个接口是NVDLA所谓的中间IR的入口。
-
-   parseCaffeNetwork()函数调用了createNetwork()函数创建了一个Network的实例，这里使用了类工厂模式。
+   INetwork接口类是一个纯虚类，仅作接口使用，不可以被实例化，可以被继承，这个接口是NVDLA所谓的中间IR的入口。parseCaffeNetwork()函数调用了createNetwork()函数创建了一个Network的实例，这里使用了类工厂模式。
 
 5. compile()
 
