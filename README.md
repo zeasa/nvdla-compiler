@@ -1,9 +1,5 @@
 # nvdla-compiler-learning #
 
-[TOC]
-
-
-
 # 1.安装准备与一些有用的资源 #
 ## 1.1.github地址 ##
 	https://github.com/nvdla
@@ -15,9 +11,27 @@
 
 - ubuntu16.04编译会出现：“  undefined reference to google::protobuf::internal::empty_string_[abi:cxx11]   ”等链接错误，原因是ubuntu16.04默认安装的是GCC5，但是nvdla的sw部分应该是用的GCC5以下的版本，google上有人讲到：“  the ABI for std::string has changed in GCC 5(related to c++ 11 requirements, but it applies even if you aren't using c++ 11   ”，解决方法是：可以在g++的编译参数中加入 -D_GLIBCXX_USR_CXX11_ABI=0, 然后就解决了，具体修改文件是nvdla/sw/umd/core/src/compiler/Makefile 把上述的字符串加到MODULE_CPPFLAGS.....以后最末尾即可编译通过
 
+- **tools/bin/tmake -build cmod_top - can't build cmod_top**
+
+  一般在Ubuntu14.04（gcc, g++ 4.8.4), 16.04 (gcc, g++ 5.4.0)可以顺利编译通过，在18.04 (gcc, g++ 8.x)以上会编译报错。因为hw支持的是低版本gcc, g++，如果要加入对高版本gcc，g++的支持，可以在**cmod/hls/include 目录下更新Algorithmic C**。
+
+  详细见 [Fix CMOD Makefile calling system GCC linker instead of user GCC #191](https://github.com/nvdla/hw/pull/191)
+
+  ```shell
+  # 笔者解决方案
+  cd PATH_TO_CMOD_HLS_INCLUDE
+  git clone https://github.com/hlslibs/ac_types tmp
+  cp tmp/include/* ./
+  rm -rf tmp
+  ```
+
+  
+
 ## 1.3.软硬件分析文章参考 ##
+
 	https://github.com/JunningWu/Learning-NVDLA-Notes
 # 2.源代码结构 #
+
 ## 2.1.整体代码目录结构 ##
 ## 2.2.hw目录结构 ##
 ![](https://github.com/zeasa/nvdla-compiler/raw/master/document/imgs/hwfolderlist.png)
@@ -150,385 +164,15 @@ layer {
    ```
    从命令函参数可以看出，目前nvdla的compiler只支持caffe模型，量化精度支持INT8和fp16，并且可以支持multibatch
 
-2. launchTest()这个函数调用testSetup函数，根据appArgs结构体，填充testInfo结构体，并以testInfo结构体为参数调用parseAndCompile()函数
+2. launchTest()
 
-   ```c
-   TestInfo testInfo;
-   PROPAGATE_ERROR_FAIL(testSetup(appArgs, &testInfo));
-   PROPAGATE_ERROR_FAIL(parseAndCompile(appArgs, &testInfo));
-   ```
-   这里涉及到两个重要的结构体TestAppArgs和TestInfo
+3. testSetup(), parseAndCompiler()
 
-   ```c
-   struct TestAppArgs
-   {
-       std::string inputPath;
-       std::string inputName;
-       std::string loadableName;
-       NvS32 serverPort;
-       NvU8 normalize_value;
-       float mean[4];
-       bool rawOutputDump;
-   };
-   struct TestInfo
-   {
-       // runtime
-       nvdla::IRuntime* runtime;
-       std::string inputLoadablePath;
-       NvU8 *inputHandle;
-       NvU8 *outputHandle;
-       NvU8 *pData;
-       bool dlaServerRunning;
-       NvS32 dlaRemoteSock;
-       NvS32 dlaServerSock;
-       NvU32 numInputs;
-       NvU32 numOutputs;
-       NvDlaImage* inputImage;
-       NvDlaImage* outputImage;
-   };
-   ```
-
-3. testSetup()：主要是检查输入输出文件路径有效性，删除前一次编译中间文件，新建新一次编译中间文件夹
-
-   ```c++
-   NvDlaError testSetup(const TestAppArgs* appArgs, TestInfo* i)
-   {
-       NvDlaError e = NvDlaSuccess;
-       std::string wisdomPath = appArgs->outputPath + "wisdom.dir/";
-       std::string removeCmd = "";
-       std::string imagePath = "";
-       NvDlaStatType stat;
-       int ii = 0;
-   
-       // Do input paths exist?
-       e = NvDlaStat(appArgs->inputPath.c_str(), &stat);
-       if (e != NvDlaSuccess)
-           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Input path does not exist: \"%s\"", appArgs->inputPath.c_str());
-   
-       // Do output paths exist?
-       e = NvDlaStat(appArgs->outputPath.c_str(), &stat);
-       if (e != NvDlaSuccess)
-           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Output path does not exist: \"%s\"", appArgs->outputPath.c_str());
-   
-       // Clear wisdomPath if any exist
-       removeCmd += "rm -rf " + wisdomPath;
-       ii = std::system(removeCmd.c_str()); // This is pretty awful
-       if (ii != 0)
-           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "system command failed: \"%s\"", removeCmd.c_str());
-   
-       PROPAGATE_ERROR_FAIL(NvDlaMkdir(const_cast<char *>(wisdomPath.c_str())));
-   
-       // Initialize TestInfo
-       i->wisdom = NULL;
-       i->wisdomPath = wisdomPath;
-       i->pData = NULL;
-   
-       return NvDlaSuccess;
-   fail:
-       return e;
-   }
-   ```
-
-   parseAndCompiler()函数：
-
-   ```c++
-   NvDlaError parseAndCompile(const TestAppArgs* appArgs, TestInfo* i)
-   {
-       NvDlaError e = NvDlaSuccess;
-       bool isCaffe = appArgs->caffemodel != "";
-   
-       PROPAGATE_ERROR_FAIL(parseSetup(appArgs, i));//这个函数为空，直接返回OK
-   
-       NvDlaDebugPrintf("creating new wisdom context...\n");
-       i->wisdom = nvdla::createWisdom();//建立编译环境，这里这个wisdom是一个接口类，工厂类和工厂模式应用
-       if (!i->wisdom)
-           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "createWisdom() failed");
-   
-       NvDlaDebugPrintf("opening wisdom context...\n");
-       if (!i->wisdom->open(i->wisdomPath))
-           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "wisdom->open() failed to open: \"%s\"", i->wisdomPath.c_str());
-   
-       // Parse，这里这个函数负责parse caffemodel的两个输入文件
-       if (isCaffe)
-           PROPAGATE_ERROR_FAIL(parseCaffeNetwork(appArgs, i));
-       else
-           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Unknown network type encountered");
-   
-       // Compile
-       PROPAGATE_ERROR_FAIL(compileProfile(appArgs, i));
-   
-       /* Destroy network before closing wisdom context */
-       nvdla::destroyNetwork(i->wisdom->getNetwork());
-   
-       NvDlaDebugPrintf("closing wisdom context...\n");
-       i->wisdom->close();
-   fail:
-       if (i->wisdom != NULL) {
-           nvdla::destroyWisdom(i->wisdom);
-           i->wisdom = NULL;
-       }
-       return e;
-   }
-   ```
-
-4. parseCaffeNetwork()：这个函数负责解析命令行传递的编译输入model文件，包括prototxt和caffemodel，前者主要定义网络的结构和参数，后者包含train好的网络的weight和bias参数值，这里只贴出这个函数最重要的部分：
-
-   ```c++
-   static NvDlaError parseCaffeNetwork(const TestAppArgs* appArgs, TestInfo* i)
-   {
-       NvDlaError e = NvDlaSuccess;
-       nvdla::INetwork* network = NULL;
-       const nvdla::caffe::IBlobNameToTensor* b = NULL;
-       nvdla::caffe::ICaffeParser* parser = nvdla::caffe::createCaffeParser();
-       std::string caffePrototxtFile = appArgs->prototxt.c_str();//caffe模型的prototxt文件
-       std::string caffeModelFile = appArgs->caffemodel.c_str();//caffe模型的caffemodel文件，blob格式
-   	
-       //这里创建网络的内存表示，主要涉及INetwork接口类和Network实现类，这里network的create使用了工厂模式
-       network = nvdla::createNetwork();
-       if (!network)
-           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "createNetwork() failed");
-   	
-       //parser->parse()函数负责caffe模型的解析，传递的参数是caffe模型的两个文件，输出是network类和IBlobNameTOTensor两个
-       NvDlaDebugPrintf("parsing caffe network...\n");
-       b = parser->parse(caffePrototxtFile.c_str(), caffeModelFile.c_str(), network);
-       if (!b)
-           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Unable to parse caffemodel: \"%s\"", caffePrototxtFile.c_str());
-   }
-   ```
-
-   对于caffemodel的具体解析在parse()函数里实现，后面章节会具体的详解，这个函数涉及了两个重要的数据结构：INetwork和Network，这里列出这两个数据结构的主要部分
-
-   ```c++
-   class INetwork
-   {
-   public:
-       virtual ITensor* addInput(const char * name, Dims4 dimensions) = 0;
-   
-       //指定网络的Input和Output Tensor
-       virtual bool markInput(ITensor * tensor) = 0;
-       virtual void markOutput(ITensor * tensor) = 0;
-   	
-       //构建网络的API函数，理论上通过以下这组add函数，就可以不使用caffe模型，手工的创建一个网络，类似大多数框架提供的网络构造API函数，但NVDLA似乎没有对外开放这组接口用于手工构造网络，TVM框架就对望开放了这组接口
-       virtual IConvolutionLayer *    addConvolution   (ITensor * input, int numOutputs, int paddingValue, Dims2 kernelSize,  Dims2 tlPadding, Dims2 brPadding, Dims2 stride, Dims2 dilation,
-   Weights kernelWeights, Weights biasWeights, BiasMode biasMode, int numGroups) = 0;
-       virtual IFullyConnectedLayer * addFullyConnected(ITensor * input, int outputSize, Weights kernelWeights, Weights biasWeights, BiasMode biasMode) = 0;
-       virtual IActivationLayer *     addActivation    (ITensor * input, ActivationType type) = 0;
-       virtual IPoolingLayer *        addPooling       (ITensor * input, PoolingType type,
-    Dims2 windowSize, Dims2 stride, Dims2 tlPadding, Dims2 brPadding) = 0;
-       virtual ILRNLayer *            addLRN           (ITensor * input, int window, float alpha, float beta, float k) = 0;
-       virtual IScaleLayer *          addScale         (ITensor * input, ScaleMode mode, Weights shift, Weights scale, Weights power) = 0;
-       virtual IBatchNormLayer *      addBatchNorm     (ITensor * input, BatchNormMode mode, Weights mean, Weights variance, float epsilon) = 0;
-       virtual ISoftMaxLayer *        addSoftMax       (ITensor*input) = 0;
-       virtual IConcatenationLayer *  addConcatenation (ITensor*const*inputs, int numInputs) = 0;
-       virtual ISliceLayer *          addSlice         (ITensor*input, int numOutputs) = 0;
-       virtual IDeconvolutionLayer *  addDeconvolution (ITensor * input, int numOutputs, int paddingValue, Dims2 kernelSize, Dims2 tlPadding, Dims2 brPadding, Dims2 stride, Dims2 dilation,
-   Weights kernelWeights, Weights biasWeights, BiasMode biasMode, int numGroups) = 0;
-       virtual IElementWiseLayer   *  addElementWise   (ITensor *input0, ITensor* input1, ElementWiseOperation op) = 0;
-   
-       virtual int getNumInputs()  const  = 0;
-       virtual int getNumOutputs() const  = 0;
-       virtual int getNumLayers()  const  = 0;
-       virtual ILayer  * getLayer(int index)  const = 0;
-       virtual ITensor * getOutput(int index) const = 0;
-       virtual ITensor * getInput(int index)  const = 0;
-       virtual void setPoolingOutputDimensionsFormula      (OutputDimensionsFormula* callback) = 0;
-       virtual void setConvolutionOutputDimensionsFormula  (OutputDimensionsFormula* callback) = 0;
-       virtual void setDeconvolutionOutputDimensionsFormula(OutputDimensionsFormula* callback) = 0;
-       virtual OutputDimensionsFormula& getPoolingOutputDimensionsFormula()       const = 0;
-       virtual OutputDimensionsFormula& getConvolutionOutputDimensionsFormula()   const = 0;
-       virtual OutputDimensionsFormula& getDeconvolutionOutputDimensionsFormula() const = 0;
-       //注意这三个接口函数，获取Network的输入tensors、输出tensors和层，返回是vector
-       virtual const std::vector<ITensor *> & getInputs()  const = 0;
-       virtual const std::vector<ILayer * > & getLayers()  const = 0;
-       virtual const std::vector<ITensor *> & getOutputs() const = 0;
-   };
-   ```
-
-   INetwork接口类是一个纯虚类，仅作接口使用，不可以被实例化，可以被继承，这个接口是NVDLA所谓的中间IR的入口。parseCaffeNetwork()函数调用了createNetwork()函数创建了一个Network的实例，这里使用了类工厂模式。
-
-   ```c++
-   INetwork *createNetwork()
-   {
-       priv::NetworkFactory::NetworkPrivPair n = priv::NetworkFactory::newNetwork();
-       return n.i();
-   }
-   
-   class NetworkFactory
-   {
-   public:
-       typedef PrivPair<INetwork *, Network*> NetworkPrivPair;
-   	
-       //类工厂模式，注意，以下这些函数必须是static类型
-       static NetworkPrivPair newNetwork();
-       static NvDlaError deleteNetwork(INetwork *network);
-   
-       static Network *priv(INetwork *);//通过INetwork查找关联的Network
-       static INetwork *i(Network *); //通过Network查找关联的INetwork
-       static INetwork *self(void *s);
-   
-       static INetwork *deserializeFrom(WisdomContainerEntry *);
-   
-   protected:
-       static BiMap<INetwork *, Network *> s_priv; //BiMap双向映射数据结构方便前后两个数据相互查找
-       static BiMap<void *, INetwork *> s_self; //BiMap双向映射数据结构
-   
-       static INetwork *deserializeNetwork(WisdomContainerEntry *);
-   };
-   NetworkFactory::NetworkPrivPair NetworkFactory::newNetwork()
-   {
-       INetwork *network;
-       Network *network_priv;
-       network = network_priv = new priv::Network();//实际创建的是Network类型
-       if (network) {
-           s_priv.insert(network, network_priv);
-           s_self.insert(network, network);
-       }
-       return NetworkPrivPair(network, network_priv);
-   }
-   
-   // PrivPair and PrivDiamond simplify management of the pointers necessary
-   // to track public interfaces, their private implementations and derivations
-   // of such which result in a diamond inheritance pattern.  These are simply
-   // fancy 2 and 4-tuples implemented by std::pair and 2x same.
-   // Note: with RTTI enabled this can all disappear as dynamic_cast<>()
-   // would be available instead ;(
-   //这个模板类实现了一个Interface类和他的一个具体实现之间相互关联的数据结构，这么做应该是为了
-   //实现RTTI功能
-   template <typename I, typename P>
-   class PrivPair
-   {
-   public:
-       typedef I InterfaceType;
-       typedef P PrivateType;
-   
-       PrivPair() : m_i_priv(0, 0) { }
-       PrivPair(I i, P priv) :
-           m_i_priv(i, priv) { }
-       PrivPair(const PrivPair &p) :
-           m_i_priv(p.m_i_priv) { }
-       inline bool operator !() const { return (!m_i_priv.first) || (!m_i_priv.second); }
-       inline bool operator ==(const PrivPair &rhs) const { return m_i_priv == rhs.m_i_priv; }
-       inline bool operator <(const PrivPair &rhs) const { return m_i_priv < rhs.m_i_priv; }
-       inline I i() const      { return m_i_priv.first;  }
-       inline P priv() const   { return m_i_priv.second; }
-   protected:
-       std::pair<I, P> m_i_priv;
-   };
-   ```
+4. parseCaffeNetwork()
 
 5. compile()
 
-   ```c++
-   //这个函数接受的参数包括，profileName，targetConfigName，ILoadable双重指针
-   NvDlaError Compiler::compile(const char *tp_name, const char *target_config_name, ILoadable **peli)
-   {
-       NvDlaError e = NvDlaSuccess;
-       //调用compileInternal()函数完成实际编译工作
-       CATCH_PROPAGATE_ERROR_FAIL(
-           compileInternal(tp_name, target_config_name, peli, true /*full compile*/)
-       );
-   fail:
-       return e;
-   }
-   ```
-
-   这个函数实际调用了compileInternal()函数完成实际编译工作，但涉及到了一个重要的数据接口类:ILoabable
-
-   ```c++
-   class ILoadable
-   {
-   public:
-       enum Interface;
-       enum MemoryDomain;
-       enum MemoryFlags;
-       enum EventOp;
-       
-       //以下这些struct定义了loadable文件中的一系列重要的数据结构，
-       //compiler的核心功能就是把模型编译成下面这些数据结构存入loadable文件
-       //runtime的核心功能就是从loadable中解析如下数据结构并提交硬件进行计算
-       struct Version;
-       struct MemoryListEntry;
-       struct EventListEntry;
-       struct TaskListEntry;
-       struct SubmitListEntry;
-       struct AddressListEntry;
-       struct TensorDescListEntry;
-       struct RelocEntry;
-       struct Blob;
-   
-       virtual std::string getName() const = 0;
-       
-       virtual int getNumMemoryListEntries() const = 0;
-       virtual MemoryListEntry getMemoryListEntry(NvU16 mem_id) const = 0;
-       
-       virtual int getNumEventListEntries() const = 0;
-       virtual EventListEntry getEventListEntry(NvU16 event_id) const = 0;
-       
-       virtual int getNumTaskListEntries() const = 0;
-       virtual TaskListEntry getTaskListEntry(NvU16 task_id) const = 0;
-       
-       virtual int getNumAddressListEntries() const = 0;
-       virtual AddressListEntry getAddressListEntry(NvU16 i) const = 0;
-       
-       virtual int getNumTensorDescListEntries() const = 0;
-       virtual TensorDescListEntry getTensorDescListEntry(NvU16 i) const = 0;
-       
-       virtual NvDlaError getNetworkDataType(DataType::UnderlyingType *) const = 0;
-       
-       virtual NvDlaError getNumInputTensors(int *) const = 0;
-       virtual NvDlaError getInputTensorDesc(NvU16 id, ILoadable::TensorDescListEntry *) const = 0;
-       
-       virtual NvDlaError getNumOutputTensors(int *) const = 0;
-       virtual NvDlaError getOutputTensorDesc(NvU16 id, ILoadable::TensorDescListEntry *) const = 0;
-   protected:
-       ILoadable();
-       virtual ~ILoadable();
-   };
-   ```
-
-   在ILoadable接口中列出的一系列struct很重要，穿插在整个compiler工作的各个环节，后面会专门整理出来。
-
 6. compilerInternal()
-
-   第一层compilerInternal()函数，接收compiler函数传递过来的profile_name和target_config_name字符串，把这两个参数转换成Profile对象和TargetConfig对象，便于下一层compilerInternal函数使用：
-
-   ```c++
-   NvDlaError Compiler::compileInternal(const char *tp_name, const char *target_config_name, ILoadable **peli, bool fullCompile)
-   {
-       NvDlaError e = NvDlaSuccess;
-       Profiler *profiler = 0;
-       ProfileFactory::ProfilePrivPair p_profile;
-       Profile *profile = 0;
-       TargetConfig *target_config = 0;
-       vector<engine_ast::Graph *> g;
-   
-       if ( !m_wisdom ) ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "No wisdom available.");
-   
-       profiler = ProfilerFactory::priv(m_wisdom->getProfiler());
-       if ( !profiler ) ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "No profiler available.");
-   
-       //将tp_name字符串参数转换成Profile对象
-       profile = ProfileFactory::priv(profiler->getProfile(tp_name));
-       if ( !profile )
-       {
-           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Couldn't find profile to compile.");
-       }
-   	//将target_config_name字符串参数转换成TargetConfig对象
-       target_config = TargetConfigFactory::priv(profiler->getTargetConfig(target_config_name));
-       if ( !target_config )
-       {
-           ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Couldn't find target config to compile.");
-       }
-   	//调用重载的compileInternal()执行下一步编译，这里参数已经是profile和target_config对象了
-       PROPAGATE_ERROR_FAIL( compileInternal(profile, target_config, peli, fullCompile) );
-   fail:
-       return e;
-   }
-   ```
-
-   上述代码涉及到两个重要的数据结构，Profile和TargetConfig类：
-
-   
 
 7. compilerInternal()
 
