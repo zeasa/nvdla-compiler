@@ -25,7 +25,7 @@
   rm -rf tmp
   ```
 - **$ cmake部分出现-Could NOT find Lua**
- 
+
   ``` -- Searching for SystemC
   -- SystemC version = 2.3.0
   -- SystemC library = /usr/local/systemc-2.3.0/lib-linux64/libsystemc.so
@@ -374,7 +374,8 @@ layer {
        virtual const std::vector<ITensor *> & getOutputs() const = 0;
    };
    ```
-=======
+   =======
+
 3. testSetup(), parseAndCompiler()
 
 4. parseCaffeNetwork()
@@ -521,7 +522,7 @@ layer {
 
    在ILoadable接口中列出的一系列struct很重要，穿插在整个compiler工作的各个环节，后面会专门整理出来。
 
-6. compilerInternal()
+8. compilerInternal()
 
    第一层compilerInternal()函数，接收compiler函数传递过来的profile_name和target_config_name字符串，把这两个参数转换成Profile对象和TargetConfig对象，便于下一层compilerInternal函数使用：
 
@@ -561,11 +562,97 @@ layer {
 
    上述代码涉及到两个重要的数据结构，Profile和TargetConfig类：
 
+   ```c++
+   class Profile : public IProfile
+   {
+   public:
+       struct GlobalParams
+       {
+           NvU32                   m_NwInPixelOffX;
+           NvU32                   m_NwInPixelOffY;
+           nvdla::DataFormat       m_NwInDataFormat;     // NCHW default
+           nvdla::DataFormat       m_NwOutDataFormat;    // NCHW default
+           surface::SurfaceFormat  m_NwInSurfFormat;
+           surface::SurfaceFormat  m_NwOutSurfFormat;
+           surface::PixelMapping   m_NwInPixelMapping;
+       };
+       struct CompileParams
+       {
+           bool    m_canCompressWeights;
+           bool    m_canWinograd;
+           NvU32   m_CONVWeightBanksAllotted;
+           NvU32   m_CONVDataBanksAllotted;
+           bool    m_canSDPPDPOnFly;
+           bool    m_canSDPMergeMathOps;
+           bool    m_canSDPFuseSubEngineOps;
+           bool    m_canSDPBustNOPs;
+           bool    m_canSDPFuseVerticalOps;
+           bool    m_useCVSRAMAllocate;
+           bool    m_useMemPool;
+           bool    m_useReusePooledMemory;
+           bool    m_copyOutDebugSurfaces;
+           bool    m_useGreedyEviction;
+           NvU64   m_globalDRAMSize;
+           NvU64   m_localDRAMSize;
+           NvU64   m_localCVSRAMSize;
+           NvU32   m_multiBatchSize;
+           bool    m_canIMGPostChnlExtend;
+           surface::SurfacePrecision m_computePrecision;
+           nvdla::TensorScalingMode  m_tensorScalingMode;
+           nvdla::QuantizationMode   m_quantizationMode;
+       };
+   protected:
+       std::string m_name;
+       std::map< std::string, ILoadable *> m_loadablesByName;
+       std::vector<ILoadable *> m_loadables;
    
+       GlobalParams m_globalParams;
+       CompileParams m_compileParams;
+   };
+   ```
 
-7. compilerInternal()
+   这个Profile类主要是记录编译器的各种编译选项，其中有一部分应该是从命令行参数传递过来的。
 
-8. generateGraph(), generateGraph(), emit()
+   ```c++
+   class TargetConfig : public ITargetConfig
+   {
+   public:
+       struct TargetConfigParams
+       {
+           NvU32   m_atomicCSize;
+           NvU32   m_atomicKSize;
+           NvU32   m_memoryAtomicSize;
+           NvU32   m_numConvBufBankAllotted;
+           NvU32   m_numConvBufEntriesPerBank;
+           NvU32   m_numConvBufEntryWidth;
+           NvU32   m_maxBatchSize;
+           bool    m_isWinogradCapable;
+           bool    m_isCompressWeightsCapable;
+           bool    m_isBatchModeCapable;
+           bool    m_isPDPCapable;
+           bool    m_isCDPCapable;
+           bool    m_isSDPBiasCapable;
+           bool    m_isSDPBatchNormCapable;
+           bool    m_isSDPEltWiseCapable;
+           bool    m_isSDPLutCapable;
+           bool    m_isBDMACapable;
+           bool    m_isRubikCapable;
+       };
+   protected:
+       std::string m_instance_name;
+       TargetConfigParams m_targetConfigParams;
+   };
+   ```
+
+   这个TargetConfig数据结构主要用来记录DPU的内部硬件配置信息。
+
+9. compilerInternal()
+
+   这个函数是整个编译器的核心部分，主要包括了caffe模型到内部表示IR的转换，IR的各种优化变换，IR到后端代码生成等，后面会详细说明内部执行流程。
+
+10. canonical_ast::generateGraph(), engine_ast::generateGraph(), emit()
+
+    canonical_ast::generateGraph()功能是caffe模型到内部graph的变换，engine_ast::generateGraph()功能是内部graph到适配DPU的op的内部graph变换，emit()功能是后端代码生成，这三个函数是compilerInternal()的核心部分，剩余的其他函数主要执行graph的各种变换与优化，后面会详细分析。
 
 ### 4.3.3.代码流程分析-前端caffe模型到CanonicalAST表示
 
