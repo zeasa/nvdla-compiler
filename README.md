@@ -755,7 +755,7 @@ private:
 };
 ```
 
-要理解Caffemodel的parse，就需要了解caffe的model文件格式。前面讲了compiler的输入caffe文件包括了
+要理解Caffemodel的parse，就需要了解caffe的model文件格式。前面讲了compiler的输入caffe文件包括了prototxt文件和caffemodel文件，其中prototxt文件时JSON格式的文本，主要描述了caffe网络的层次结构，那么caffemodel文件主要是存储了pre_trained的网络weight和bias参数信息。
 
 ```c++
 const IBlobNameToTensor* CaffeParser::parse(const char* deployFile,const char* modelFile,
