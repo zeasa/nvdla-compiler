@@ -817,6 +817,7 @@ const IBlobNameToTensor* CaffeParser::parse(const char* deployFile,const char* m
     }
 
     bool ok = true;
+    //提取mModel中的weight数据，放到weights变量中，后面调用每层解析函数时作为参数传递进去
     CaffeWeightFactory weights(*mModel, false, mTmpAllocs);
 	//mBlobNameToTensor变量维护一个blob文件中weight数据到ITensor*的映射关系
     mBlobNameToTensor = new BlobNameToTensor();
@@ -891,6 +892,7 @@ const IBlobNameToTensor* CaffeParser::parse(const char* deployFile,const char* m
         else
         {
             //如果找到相应的layer层解析函数，则直接调用相应的解析函数对层进行解析？
+            //weights变量包含了所有层的weight数据，解析层的时候可以用上
             ILayer* layer = (*v->second)(network, layerMsg, weights, mBlobNameToTensor);
             if (layer == 0)
             {
@@ -905,6 +907,7 @@ const IBlobNameToTensor* CaffeParser::parse(const char* deployFile,const char* m
             }
         }
     }
+    //为表格中每个tensor设定name，其实就是把tensor的name设定成blobname
     mBlobNameToTensor->setTensorNames();
     return ok && weights.isOK() ? mBlobNameToTensor : 0;
 }
@@ -1068,8 +1071,6 @@ typedef ILayer*(*LayerParseFn)(INetwork *, const dc::LayerParameter&, CaffeWeigh
 ```
 
 ​	可以看到，对应caffe模型中的每一种layer，都有相应的解析函数，这些解析函数的功能都类似，负责解析一个layer，然后调用network提供的API，自动构造一个network网络内存模型。整个caffe模型到network内存表示的解析比较复杂，其中用到了google开源的protobuf库，实现在CaffePaser.cpp文件当中。
-
-
 
 ### 4.3.4.代码流程分析-network内部表示到canonical_ast::Graph图表示
 
