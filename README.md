@@ -1074,6 +1074,8 @@ typedef ILayer*(*LayerParseFn)(INetwork *, const dc::LayerParameter&, CaffeWeigh
 
 ### 4.3.4.代码流程分析-network内部表示到canonical_ast::Graph图表示
 
+前一阶段主要工作是使用protobuf库，根据ditcaffe.proto文件的定义，解析compiler的输入文件*.prototxt和*.caffemodel，生成protobuf的deserialize格式数据NetParameter，然后根据NetParameter数据（包括net的层定义和weight等信息），根据每层的type调用network类的各种API构建一个network内存表示对象，如下：
+
 ```c++
 class Network : public INetwork
 {
@@ -1090,8 +1092,7 @@ public: // externally facing
 Dims2 kernelSize, Dims2 tlPadding, Dims2 brPadding, Dims2 stride, Dims2 dilation, Weights kernelWeights, Weights biasWeights, BiasMode biasmode, int numGroups);
     virtual IFullyConnectedLayer * addFullyConnected(ITensor* input, int outputSize, Weights kernelWeights, Weights biasWeights, BiasMode biasMode);
     virtual IActivationLayer *     addActivation(ITensor* input, ActivationType type);
-    virtual IPoolingLayer *        addPooling(ITensor* input, PoolingType type,
-Dims2 windowSize, Dims2 stride, Dims2 tlPadding, Dims2 brPadding);
+    virtual IPoolingLayer *        addPooling(ITensor* input, PoolingType type,Dims2 windowSize, Dims2 stride, Dims2 tlPadding, Dims2 brPadding);
     virtual ILRNLayer *            addLRN(ITensor* input, int window, float alpha, float beta, float k);
     virtual IScaleLayer *          addScale(ITensor* input, ScaleMode mode, Weights shift, Weights scale, Weights power);
     virtual IBatchNormLayer *      addBatchNorm(ITensor* input, BatchNormMode mode, Weights mean, Weights variance, float epsilon);
@@ -1099,8 +1100,7 @@ Dims2 windowSize, Dims2 stride, Dims2 tlPadding, Dims2 brPadding);
     virtual IConcatenationLayer *  addConcatenation(ITensor * const * inputs, int numInputs);
     virtual ISliceLayer *          addSlice(ITensor* input, int numOutputs);
     virtual IDeconvolutionLayer *  addDeconvolution(ITensor* input, int numOutputs, int paddingValue,
-Dims2 kernelSize, Dims2 tlPadding, Dims2 brPadding, Dims2 stride, Dims2 dilation,
-Weights kernelWeights, Weights biasWeights, BiasMode biasMode, int numGroups);
+Dims2 kernelSize, Dims2 tlPadding, Dims2 brPadding, Dims2 stride, Dims2 dilation,Weights kernelWeights, Weights biasWeights, BiasMode biasMode, int numGroups);
     virtual IElementWiseLayer *    addElementWise(ITensor* input0, ITensor* input1, ElementWiseOperation op);
 
     virtual int  getNumInputs() const;
@@ -1157,9 +1157,20 @@ private:
 };
 ```
 
+可以看到，除了一系列各种type的layer添加API函数以外，还有就是下列几个private数据变量：
 
+```c++
+    std::vector<ITensor *> mTensors;//network的tensor
+    std::vector<ILayer *>  mLayers; //network的layers
+    std::vector<ITensor *> mInputs; //network的inputTensor
+    std::vector<ITensor *> mOutputs;//network的outputTensor
+```
+
+可以看到，这几个变量只是简单的记录了network的layer、tensor、input和output等信息，并没有图的节点边缘以及连接先后关系等概念。下一阶段应该是根据network数据结构构建CAG图的工作。
 
 ### 4.3.5.代码流程分析-canonical_ast::Graph到engine_ast::Graph图表示
+
+
 
 ### 4.3.6.代码流程分析-EngineAST中间IR变换与优化PASS
 
