@@ -755,7 +755,34 @@ private:
 };
 ```
 
-要理解Caffemodel的parse，就需要了解caffe的model文件格式。前面讲了compiler的输入caffe文件包括了prototxt文件和caffemodel文件，其中prototxt文件时JSON格式的文本，主要描述了caffe网络的层次结构，那么caffemodel文件主要是存储了pre_trained的网络weight和bias参数信息。
+要理解Caffemodel的parse，就需要了解caffe的model文件格式。前面讲了compiler的输入caffe文件包括了prototxt文件和caffemodel文件，其中prototxt文件时JSON格式的文本，主要描述了caffe网络的层次结构，那么caffemodel文件主要是存储了pre_trained的网络weight和bias参数信息。其中caffemodel文件是google的protobuf格式，其解析需要使用到protobuf库来进行。所有关于caffe模型解析的文件都位于sw/umd/core/src/compiler/caffe/目录下，其中此目录下的CaffeParser.cpp是caffemodel的解析器，其功能是调用ditcaffe文件夹下的文件完成的。ditcaffe文件夹下的ditcaffe.proto是caffemodel文件的proto结构定义文件，通过protobuf的编译器编译成protobuf-2.6.1目录下的ditcaffe.pb.cpp和ditcaffe.pb.h两个文件，即是实际caffemodel文件解析功能的具体实现。
+
+```json
+syntax = "proto2";
+//option optimize_for = LITE_RUNTIME;
+package ditcaffe;
+// Specifies the shape (dimensions) of a Blob.
+message BlobShape {
+  repeated int64 dim = 1 [packed = true];
+}
+message BlobProto {
+  optional BlobShape shape = 7;
+  repeated float data = 5 [packed = true];
+  repeated float diff = 6 [packed = true];
+  repeated double double_data = 8 [packed = true];
+  repeated double double_diff = 9 [packed = true];
+  repeated uint32 half_data = 10 [packed = true];
+  repeated uint32 half_diff = 11 [packed = true];
+
+  // 4D dimensions -- deprecated.  Use "shape" instead.
+  optional int32 num = 1 [default = 0];
+  optional int32 channels = 2 [default = 0];
+  optional int32 height = 3 [default = 0];
+  optional int32 width = 4 [default = 0];
+}
+```
+
+上面这段代码就是ditcaffe.proto文件的开头部分，主要是定义了caffemodel文件里的数据存放格式。
 
 ```c++
 const IBlobNameToTensor* CaffeParser::parse(const char* deployFile,const char* modelFile,
