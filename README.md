@@ -755,9 +755,9 @@ private:
 };
 ```
 
-要理解Caffemodel的parse，就需要了解caffe的model文件格式。前面讲了compiler的输入caffe文件包括了prototxt文件和caffemodel文件，其中prototxt文件时JSON格式的文本，主要描述了caffe网络的层次结构，那么caffemodel文件主要是存储了pre_trained的网络weight和bias参数信息。其中caffemodel文件是google的protobuf格式，其解析需要使用到protobuf库来进行。所有关于caffe模型解析的文件都位于sw/umd/core/src/compiler/caffe/目录下，其中此目录下的CaffeParser.cpp是caffemodel的解析器，其功能是调用ditcaffe文件夹下的文件完成的。ditcaffe文件夹下的ditcaffe.proto是caffemodel文件的proto结构定义文件，通过protobuf的编译器编译成protobuf-2.6.1目录下的ditcaffe.pb.cpp和ditcaffe.pb.h两个文件，即是实际caffemodel文件解析功能的具体实现。
+要理解Caffemodel的parse，就需要了解caffe的model文件格式。前面讲了compiler的输入caffe文件包括了prototxt文件和caffemodel文件，其中prototxt文件时JSON格式的文本，主要描述了caffe网络的层次结构，那么caffemodel文件主要是存储了pre_trained的网络weight和bias参数信息。其中caffemodel文件是google的protobuf格式，其解析需要使用到protobuf库来进行。所有关于caffe模型解析的文件都位于sw/umd/core/src/compiler/caffe/目录下，其中此目录下的CaffeParser.cpp是caffemodel的解析器，其功能是调用ditcaffe文件夹下的文件完成的。ditcaffe文件夹下的ditcaffe.proto是caffemodel文件的proto结构定义文件，通过protobuf的编译器编译成protobuf-2.6.1目录下的ditcaffe.pb.cpp和ditcaffe.pb.h两个文件，即是实际caffemodel文件解析功能的具体实现。注意protobuf库解析过的caffemodel的内存变量格式是NetParameter类型，这个类型的实际定义来源于ditcaffe.proto文件定义。
 
-```json
+```protobuf
 syntax = "proto2";
 //option optimize_for = LITE_RUNTIME;
 package ditcaffe;
@@ -798,11 +798,19 @@ const IBlobNameToTensor* CaffeParser::parse(const char* deployFile,const char* m
     network->setPoolingOutputDimensionsFormula(mDimsCallback);
 
     //调用readBinaryProto()函数解析modelFile文件，返回到NetParameter类型的mModel变量当中
+    //modelFile=lenet_iter_10000.caffemodel
+    //ditcaffe::NetParameter * mModel，这个NetParameter数据结构是从ditcaffe.proto自动生成的
     mModel = new dc::NetParameter();
     if (!readBinaryProto(mModel, modelFile, mProtobufBufferSize)) {
         gLogError << "Could not parse model file" << std::endl; return 0;
     }
+    
+    // There are some challenges associated with importing caffe models. One is that
+	// a .caffemodel file just consists of layers and doesn't have the specs for its
+	// input and output blobs.So we need to read the deploy file to get the input
 	//readTextProto()函数解析deployFile文件，返回到NetParameter类型的mDeploy变量当中
+    //deployFile=lenet.prototxt
+    //ditcaffe::NetParameter * mDeploy，这个NetParameter数据结构是从ditcaffe.proto自动生成的
     mDeploy = new dc::NetParameter();
     if (!readTextProto(mDeploy, deployFile)) {
         gLogError << "Could not parse deploy file" << std::endl; return 0;
@@ -812,7 +820,8 @@ const IBlobNameToTensor* CaffeParser::parse(const char* deployFile,const char* m
     CaffeWeightFactory weights(*mModel, false, mTmpAllocs);
 	//mBlobNameToTensor变量维护一个blob文件中weight数据到ITensor*的映射关系
     mBlobNameToTensor = new BlobNameToTensor();
-
+	
+    //input blob只在prototxt文件当中，所以这里以mDeploy为基础给network增加inputTensor
     for (int i = 0; i < mDeploy->input_size(); i++) {
         Dims4 dims;
         if (mDeploy->input_shape_size()) {
@@ -828,11 +837,15 @@ const IBlobNameToTensor* CaffeParser::parse(const char* deployFile,const char* m
             dims.w = (int)mDeploy->input_dim().Get(i * 4 + 3);
         }
         //调用network的API增加network的一个InputTensor
+        //这里加入一个tensor只需要指定tensor的name和dims即可
         ITensor* tensor = network->addInput(mDeploy->input().Get(0).c_str(), dims);
-        //建立network中新增InputTensor到blob文件中tensor的映射
+        //建立network中新增InputTensor到blob文件中相应区域的name的cstring映射
         mBlobNameToTensor->add(mDeploy->input().Get(0), tensor);
     }
-
+    
+    //前面通过readBinaryProto()函数和readTextProto()函数把caffe模型的信息和weight等解析到NetParameter
+  	//类型的变量mModel和mDeploy，这里通过对layer的迭代，通过NetParameter里的LayerParameter进行解析
+    //逐步建立network的内存中间表示
     for (int i = 0; i < mDeploy->layer_size() && ok; i++) {
         const dc::LayerParameter& layerMsg = mDeploy->layer(i);
         if (layerMsg.has_phase() && layerMsg.phase() == dc::TEST) {
@@ -909,6 +922,123 @@ private:
 };
 ```
 
+```protobuf
+message NetParameter {
+  optional string name = 1; // consider giving the network a name
+  // DEPRECATED. See InputParameter. The input blobs to the network.
+  repeated string input = 3;
+  // DEPRECATED. See InputParameter. The shape of the input blobs.
+  repeated BlobShape input_shape = 8;
+  // 4D input dimensions -- deprecated.  Use "input_shape" instead.
+  // If specified, for each input blob there should be four
+  // values specifying the num, channels, height and width of the input blob.
+  // Thus, there should be a total of (4 * #input) numbers.
+  repeated int32 input_dim = 4;
+  // Whether the network will force every layer to carry out backward operation.
+  // If set False, then whether to carry out backward is determined
+  // automatically according to the net structure and learning rates.
+  optional bool force_backward = 5 [default = false];
+  // The current "state" of the network, including the phase, level, and stage.
+  // Some layers may be included/excluded depending on this state and the states
+  // specified in the layers' include and exclude fields.
+  optional NetState state = 6;
+  // Print debugging information about results while running Net::Forward,
+  // Net::Backward, and Net::Update.
+  optional bool debug_info = 7 [default = false];
+  // The layers that make up the net.  Each of their configurations, including
+  // connectivity and behavior, is specified as a LayerParameter.
+  repeated LayerParameter layer = 100;  // ID 100 so layers are printed last.
+  // DEPRECATED: use 'layer' instead.
+  repeated V1LayerParameter layers = 2;
+}
+message LayerParameter {
+  optional string name = 1; // the layer name
+  optional string type = 2; // the layer type
+  repeated string bottom = 3; // the name of each bottom blob
+  repeated string top = 4; // the name of each top blob
+  // The train / test phase for computation.
+  optional Phase phase = 10;
+  // The amount of weight to assign each top blob in the objective.
+  // Each layer assigns a default value, usually of either 0 or 1,
+  // to each top blob.
+  repeated float loss_weight = 5;
+  // Specifies training parameters (multipliers on global learning constants,
+  // and the name and other settings used for weight sharing).
+  repeated ParamSpec param = 6;
+  // The blobs containing the numeric parameters of the layer.
+  repeated BlobProto blobs = 7;
+  // Specifies whether to backpropagate to each bottom. If unspecified,
+  // Caffe will automatically infer whether each input needs backpropagation
+  // to compute parameter gradients. If set to true for some inputs,
+  // backpropagation to those inputs is forced; if set false for some inputs,
+  // backpropagation to those inputs is skipped.
+  // The size must be either 0 or equal to the number of bottoms.
+  repeated bool propagate_down = 11;
+  // Rules controlling whether and when a layer is included in the network,
+  // based on the current NetState.  You may specify a non-zero number of rules
+  // to include OR exclude, but not both.  If no include or exclude rules are
+  // specified, the layer is always included.  If the current NetState meets
+  // ANY (i.e., one or more) of the specified rules, the layer is
+  // included/excluded.
+  repeated NetStateRule include = 8;
+  repeated NetStateRule exclude = 9;
+  // Parameters for data pre-processing.
+  optional TransformationParameter transform_param = 100;
+  // Parameters shared by loss layers.
+  optional LossParameter loss_param = 101;
+  // Layer type-specific parameters.
+  //
+  // Note: certain layers may have more than one computational engine
+  // for their implementation. These layers include an Engine type and
+  // engine parameter for selecting the implementation.
+  // The default for the engine is set by the ENGINE switch at compile-time.
+  optional AccuracyParameter accuracy_param = 102;
+  optional ArgMaxParameter argmax_param = 103;
+  optional BatchNormParameter batch_norm_param = 139;
+  optional BiasParameter bias_param = 141;
+  optional ConcatParameter concat_param = 104;
+  optional ContrastiveLossParameter contrastive_loss_param = 105;
+  optional ConvolutionParameter convolution_param = 106;
+  optional CropParameter crop_param = 144;
+  optional DataParameter data_param = 107;
+  optional DropoutParameter dropout_param = 108;
+  optional DummyDataParameter dummy_data_param = 109;
+  optional EltwiseParameter eltwise_param = 110;
+  optional ELUParameter elu_param = 140;
+  optional EmbedParameter embed_param = 137;
+  optional ExpParameter exp_param = 111;
+  optional FlattenParameter flatten_param = 135;
+  optional HDF5DataParameter hdf5_data_param = 112;
+  optional HDF5OutputParameter hdf5_output_param = 113;
+  optional HingeLossParameter hinge_loss_param = 114;
+  optional ImageDataParameter image_data_param = 115;
+  optional InfogainLossParameter infogain_loss_param = 116;
+  optional InnerProductParameter inner_product_param = 117;
+  optional InputParameter input_param = 143;
+  optional LogParameter log_param = 134;
+  optional LRNParameter lrn_param = 118;
+  optional MemoryDataParameter memory_data_param = 119;
+  optional MVNParameter mvn_param = 120;
+  optional ParameterParameter parameter_param = 145;
+  optional PoolingParameter pooling_param = 121;
+  optional PowerParameter power_param = 122;
+  optional PReLUParameter prelu_param = 131;
+  optional PythonParameter python_param = 130;
+  optional ReductionParameter reduction_param = 136;
+  optional ReLUParameter relu_param = 123;
+  optional ReshapeParameter reshape_param = 133;
+  optional ScaleParameter scale_param = 142;
+  optional SigmoidParameter sigmoid_param = 124;
+  optional SoftmaxParameter softmax_param = 125;
+  optional SPPParameter spp_param = 132;
+  optional SliceParameter slice_param = 126;
+  optional TanHParameter tanh_param = 127;
+  optional ThresholdParameter threshold_param = 128;
+  optional TileParameter tile_param = 138;
+  optional WindowDataParameter window_data_param = 129;
+}
+```
+
 ​	这个函数中，有用到gParseTable这个层解析函数表，表格中存放的是从caffe模型中读取的各个层的对应解析函数表：
 
 ```c++
@@ -939,7 +1069,7 @@ typedef ILayer*(*LayerParseFn)(INetwork *, const dc::LayerParameter&, CaffeWeigh
 
 ​	可以看到，对应caffe模型中的每一种layer，都有相应的解析函数，这些解析函数的功能都类似，负责解析一个layer，然后调用network提供的API，自动构造一个network网络内存模型。整个caffe模型到network内存表示的解析比较复杂，其中用到了google开源的protobuf库，实现在CaffePaser.cpp文件当中。
 
-​	
+
 
 ### 4.3.4.代码流程分析-network内部表示到canonical_ast::Graph图表示
 
