@@ -1544,18 +1544,21 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
 
     }
 
+    //如果没有指定multibatchsize，则根据network的input tensor的n指定推导multibatchsize
+    //如果指定了multibatchsize，那就按照multibatchsize来执行
     if (profile->multiBatchSize() == 0)
     {
         // Patch up profile->multiBatchSize()
         // The compiler should be querying this information from the network instead of the profile
-
         // Collect the multibatch size of the network, based on the input tensor dimensions
         for ( vector<canonical_ast::Edge *>::const_iterator cie = can_graph->inputEdges().begin();
                     cie != can_graph->inputEdges().end(); ++cie)
         {
+            //can_graph的inputedge对应的engine_graph的edge
             engine_ast::Edge *input_edge = can_to_eng_edge_map[*cie];
+            //获取input_edge的tensor Dimension
             Dims4 networkDims = input_edge->originalTensor()->getDimensions();
-
+		   //根据input_edge的tensor Dimension的n，设定profile的multibatchsize
             PROPAGATE_ERROR_FAIL(profile->setMultiBatchSize(networkDims.n));
         }
     }
@@ -1565,23 +1568,24 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
     for ( set<canonical_ast::Node *>::iterator cni = can_graph->nodes().begin(), CNI = can_graph->nodes().end();
           cni != CNI; ++cni )
     {
-        engine_ast::Graph::EdgeSequence engSrcEdges;
-        engine_ast::Graph::EdgeSequence engSinkEdges;
-        engine_ast::Graph::NodeSequence engNodes;
-        canonical_ast::Graph::EdgeSequence canSrcEdges = can_graph->nodeEdges(*cni, ast::EdgeSideEnum::SECOND);
-        canonical_ast::Graph::EdgeSequence canSinkEdges = can_graph->nodeEdges(*cni, ast::EdgeSideEnum::FIRST);
+        engine_ast::Graph::EdgeSequence engSrcEdges;//engine_graph的SrcEdges
+        engine_ast::Graph::EdgeSequence engSinkEdges;//engine_graph的SinkEdges
+        engine_ast::Graph::NodeSequence engNodes;//engine_graph的Nodes
+        canonical_ast::Graph::EdgeSequence canSrcEdges = can_graph->nodeEdges(*cni, ast::EdgeSideEnum::SECOND);//can_graph的所有node的inputedge的总和
+        canonical_ast::Graph::EdgeSequence canSinkEdges = can_graph->nodeEdges(*cni, ast::EdgeSideEnum::FIRST);//can_graph的所有node的outputedge的总和
         canonical_ast::Graph::EdgeSequenceIterator cei;
-
+		//找出所有canSrcEdges对应的engine_edge,放入engSrcEdges列表
         for (cei = canSrcEdges.begin(); cei != canSrcEdges.end(); ++cei)
         {
             engSrcEdges.push_back(can_to_eng_edge_map[*cei]);
         }
-
+		//找出所有canSinkEdges对应的engine_edge,放入engSinkEdges列表
         for (cei = canSinkEdges.begin(); cei != canSinkEdges.end(); ++cei)
         {
             engSinkEdges.push_back(can_to_eng_edge_map[*cei]);
         }
-
+		
+        //从can_node变化eng_node???
         e = transformCanNode(eng_graph, *cni, engSrcEdges, engSinkEdges, engNodes);
         if ( e != NvDlaSuccess )
         {
