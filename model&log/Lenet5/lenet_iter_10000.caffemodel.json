@@ -1,0 +1,354 @@
+step: import urllib...... 
+parse params ......
+adding to dict
+load caffe proto
+write local caffe proto
+check sub process call
+import caffe_pb2
+convert ......
+dump
+{
+  "name": "LeNet",
+  "layer": [
+    {
+      "name": "mnist",
+      "type": "Data",
+      "top": [
+        "data",
+        "label"
+      ],
+      "include": [
+        {
+          "phase": 0
+        }
+      ],
+      "phase": 0,
+      "transform_param": {
+        "scale": 0.00390625
+      },
+      "data_param": {
+        "source": "examples/mnist/mnist_train_lmdb",
+        "batch_size": 64,
+        "backend": 1
+      }
+    },
+    {
+      "name": "conv1",
+      "type": "Convolution",
+      "bottom": [
+        "data"
+      ],
+      "top": [
+        "conv1"
+      ],
+      "param": [
+        {
+          "lr_mult": 1.0
+        },
+        {
+          "lr_mult": 2.0
+        }
+      ],
+      "blobs": [
+        {
+          "data": [
+            0.17512507736682892,
+            0.20436875522136688,
+            0.056398797780275345,
+            0.005825345404446125,
+            0.23611973226070404,
+            "(495 elements more)"
+          ],
+          "shape": {
+            "dim": [
+              20,
+              1,
+              5,
+              5
+            ]
+          }
+        },
+        {
+          "data": [
+            -0.05203453078866005,
+            -0.26182013750076294,
+            -0.1220993623137474,
+            -0.07315845042467117,
+            0.002272228477522731,
+            "(15 elements more)"
+          ],
+          "shape": {
+            "dim": [
+              20
+            ]
+          }
+        }
+      ],
+      "phase": 0,
+      "convolution_param": {
+        "num_output": 20,
+        "kernel_size": [
+          5
+        ],
+        "stride": [
+          1
+        ],
+        "weight_filler": {
+          "type": "xavier"
+        },
+        "bias_filler": {
+          "type": "constant"
+        }
+      }
+    },
+    {
+      "name": "pool1",
+      "type": "Pooling",
+      "bottom": [
+        "conv1"
+      ],
+      "top": [
+        "pool1"
+      ],
+      "phase": 0,
+      "pooling_param": {
+        "pool": 0,
+        "kernel_size": 2,
+        "stride": 2
+      }
+    },
+    {
+      "name": "conv2",
+      "type": "Convolution",
+      "bottom": [
+        "pool1"
+      ],
+      "top": [
+        "conv2"
+      ],
+      "param": [
+        {
+          "lr_mult": 1.0
+        },
+        {
+          "lr_mult": 2.0
+        }
+      ],
+      "blobs": [
+        {
+          "data": [
+            -0.035681240260601044,
+            0.010481072589755058,
+            -0.044919006526470184,
+            -0.04184895008802414,
+            -0.05604172497987747,
+            "(24995 elements more)"
+          ],
+          "shape": {
+            "dim": [
+              50,
+              20,
+              5,
+              5
+            ]
+          }
+        },
+        {
+          "data": [
+            -0.09070391952991486,
+            -0.0093239089474082,
+            -0.08942517638206482,
+            -0.0747356116771698,
+            -0.031100556254386902,
+            "(45 elements more)"
+          ],
+          "shape": {
+            "dim": [
+              50
+            ]
+          }
+        }
+      ],
+      "phase": 0,
+      "convolution_param": {
+        "num_output": 50,
+        "kernel_size": [
+          5
+        ],
+        "stride": [
+          1
+        ],
+        "weight_filler": {
+          "type": "xavier"
+        },
+        "bias_filler": {
+          "type": "constant"
+        }
+      }
+    },
+    {
+      "name": "pool2",
+      "type": "Pooling",
+      "bottom": [
+        "conv2"
+      ],
+      "top": [
+        "pool2"
+      ],
+      "phase": 0,
+      "pooling_param": {
+        "pool": 0,
+        "kernel_size": 2,
+        "stride": 2
+      }
+    },
+    {
+      "name": "ip1",
+      "type": "InnerProduct",
+      "bottom": [
+        "pool2"
+      ],
+      "top": [
+        "ip1"
+      ],
+      "param": [
+        {
+          "lr_mult": 1.0
+        },
+        {
+          "lr_mult": 2.0
+        }
+      ],
+      "blobs": [
+        {
+          "data": [
+            0.0056916940957307816,
+            0.04912935569882393,
+            0.017606962472200394,
+            0.006255228538066149,
+            -0.018927067518234253,
+            "(399995 elements more)"
+          ],
+          "shape": {
+            "dim": [
+              500,
+              800
+            ]
+          }
+        },
+        {
+          "data": [
+            -0.001014266861602664,
+            0.0008918698295019567,
+            -0.0036262974608689547,
+            -0.0019168407889083028,
+            0.004404952749609947,
+            "(495 elements more)"
+          ],
+          "shape": {
+            "dim": [
+              500
+            ]
+          }
+        }
+      ],
+      "phase": 0,
+      "inner_product_param": {
+        "num_output": 500,
+        "weight_filler": {
+          "type": "xavier"
+        },
+        "bias_filler": {
+          "type": "constant"
+        }
+      }
+    },
+    {
+      "name": "relu1",
+      "type": "ReLU",
+      "bottom": [
+        "ip1"
+      ],
+      "top": [
+        "ip1"
+      ],
+      "phase": 0
+    },
+    {
+      "name": "ip2",
+      "type": "InnerProduct",
+      "bottom": [
+        "ip1"
+      ],
+      "top": [
+        "ip2"
+      ],
+      "param": [
+        {
+          "lr_mult": 1.0
+        },
+        {
+          "lr_mult": 2.0
+        }
+      ],
+      "blobs": [
+        {
+          "data": [
+            -0.041817497462034225,
+            -0.03892360255122185,
+            0.0719957947731018,
+            -0.09684727340936661,
+            -0.01241234876215458,
+            "(4995 elements more)"
+          ],
+          "shape": {
+            "dim": [
+              10,
+              500
+            ]
+          }
+        },
+        {
+          "data": [
+            -0.003972433973103762,
+            0.0095968721434474,
+            -0.009251110255718231,
+            -0.02855263277888298,
+            -0.021083267405629158,
+            "(5 elements more)"
+          ],
+          "shape": {
+            "dim": [
+              10
+            ]
+          }
+        }
+      ],
+      "phase": 0,
+      "inner_product_param": {
+        "num_output": 10,
+        "weight_filler": {
+          "type": "xavier"
+        },
+        "bias_filler": {
+          "type": "constant"
+        }
+      }
+    },
+    {
+      "name": "loss",
+      "type": "SoftmaxWithLoss",
+      "bottom": [
+        "ip2",
+        "label"
+      ],
+      "top": [
+        "loss"
+      ],
+      "loss_weight": [
+        1.0
+      ],
+      "phase": 0
+    }
+  ]
+}
