@@ -1457,6 +1457,315 @@ done:
 
 ### 4.3.5.代码流程分析-canonical_ast::Graph到engine_ast::Graph图表示
 
+​	这部分功能主要由engine_ast::generateGraph()函数完成
+
+```c++
+//这个函数完成的是两个graph的转换，通过参数可以看到，输入不仅仅由can_graph,还有编译器的profile和编译目标配置target_config，说明转换后的graph应该反应部分硬件和编译选项的要求
+engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *target_config, canonical_ast::Graph *can_graph)
+{
+    NvDlaError e = NvDlaSuccess;
+    vector<engine_ast::Edge *> input_edges;
+    vector<engine_ast::Edge *> output_edges;
+
+    vector<canonical_ast::Node *> can_edge_first_nodes, can_edge_second_nodes;
+    map<canonical_ast::Node *, engine_ast::Node *> can_to_eng_sink_node_map;
+    map<canonical_ast::Node *, engine_ast::Node *> can_to_eng_source_node_map;
+    map<canonical_ast::Edge *, engine_ast::Edge *> can_to_eng_edge_map;
+    vector<canonical_ast::Node *>::const_iterator f, begin, end;
+    vector<engine_ast::Node *> first_nodes, second_nodes;
+    engine_ast::Graph *eng_graph;
+
+    if ( !profile )
+    {
+        ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "must associate profile with Engine AST generateGraph");
+    }
+
+    if ( !target_config )
+    {
+        ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "must associate target_config with Engine AST generateGraph");
+    }
+	
+    //编译目标是否支持批处理
+    if (target_config->isBatchModeCapable())
+    {
+        NvU32 numBatches = profile->multiBatchSize();
+        NvU32 maxBatches = target_config->maxBatchSize();
+		//如果指定编译的批处理batchsize大于目标能力
+        if (numBatches > maxBatches)
+        {
+            ORIGINATE_ERROR_FAIL(NvDlaError_BadValue, "numbatches is greater than allowed maxbatches (%d)", maxBatches);
+        }
+    }
+	//建立engine_graph对象，参数是profile和target_config
+    eng_graph  = new engine_ast::Graph(profile, target_config);
+    if ( !eng_graph )
+    {
+        ORIGINATE_ERROR_FAIL(NvDlaError_InsufficientMemory, "Can't create a new Engine AST");
+    }
+	//初始化eng_graph的资源，主要是内存池和LutManager，内存池包括GLOBAL_DRAM_POOL，LOCAL_DRAM_POOL
+    //如果profile开启了SRAM，那么还有LOCAL_CVSRAM_POOL，这三个mempool的大小由profile参数指定
+    e = eng_graph->initGraphResources();
+    if (e != NvDlaSuccess)
+    {
+        delete eng_graph;
+        eng_graph = NULL;
+        ORIGINATE_ERROR_FAIL(NvDlaError_InsufficientMemory, "Couldn't initialize all graph resources");
+    }
+	
+    //graph访问计分板，后面统一详细解释
+    eng_graph->setScoredOrdering( new ScoredDependencyOrdering(eng_graph) );
+    eng_graph->setOrdering(new DependencyOrdering(eng_graph->scoredOrdering()));
+
+    // create edges to mirror the canonical edges.
+    // 迭代所有can_graph的edges
+    for ( set<canonical_ast::Edge *>::iterator cei = can_graph->edges().begin(), CEI = can_graph->edges().end();
+          cei != CEI; ++cei )
+    {
+        //根据canonical_ast::Edge建立engine_ast::Edge对象
+        engine_ast::Edge* engine_edge = new engine_ast::Edge(*cei);
+        Tensor* engine_tensor = 0;
+        if ( !engine_edge )
+        {
+            delete eng_graph; // blow up
+            eng_graph = NULL;
+            ORIGINATE_ERROR_FAIL(NvDlaError_InsufficientMemory, "Couldn't transform canonical edge '%s' into engine edge", (*cei)->id().c_str());
+        }
+		//engine_tensor复制自can_tensor,前面讲过can_tensor其实是clone自network的tensor
+        engine_tensor = (*cei)->originalTensor()->clone();
+        engine_tensor->setDataFormat(nvdla::DataFormat::NCHW);//engine_tensor的dataformat
+        engine_tensor->setNetwork(NULL); //这一步其实用不着，因为can_tensor已经是NULL了
+
+        engine_edge->setGraph(eng_graph);//指定engine_edge的container为eng_graph
+        engine_edge->setId(eng_graph->nextEdgeId());//设定engine_edge的Id，string类型，e-0,e-1等
+        engine_edge->setDataEdge();//设定edge的type为DATA
+        engine_edge->setOriginalTensor(engine_tensor);//指定edge关联的tensor
+        can_to_eng_edge_map[*cei] = engine_edge;//建立can_edge和engine_edge的关联MAP
+        eng_graph->insertEdge(engine_edge);//把engine_edge加入eng_graph的edge列表
+
+    }
+
+    if (profile->multiBatchSize() == 0)
+    {
+        // Patch up profile->multiBatchSize()
+        // The compiler should be querying this information from the network instead of the profile
+
+        // Collect the multibatch size of the network, based on the input tensor dimensions
+        for ( vector<canonical_ast::Edge *>::const_iterator cie = can_graph->inputEdges().begin();
+                    cie != can_graph->inputEdges().end(); ++cie)
+        {
+            engine_ast::Edge *input_edge = can_to_eng_edge_map[*cie];
+            Dims4 networkDims = input_edge->originalTensor()->getDimensions();
+
+            PROPAGATE_ERROR_FAIL(profile->setMultiBatchSize(networkDims.n));
+        }
+    }
+
+    // create nodes to mirror the canonical nodes
+    // 迭代can_graph的所有nodes
+    for ( set<canonical_ast::Node *>::iterator cni = can_graph->nodes().begin(), CNI = can_graph->nodes().end();
+          cni != CNI; ++cni )
+    {
+        engine_ast::Graph::EdgeSequence engSrcEdges;
+        engine_ast::Graph::EdgeSequence engSinkEdges;
+        engine_ast::Graph::NodeSequence engNodes;
+        canonical_ast::Graph::EdgeSequence canSrcEdges = can_graph->nodeEdges(*cni, ast::EdgeSideEnum::SECOND);
+        canonical_ast::Graph::EdgeSequence canSinkEdges = can_graph->nodeEdges(*cni, ast::EdgeSideEnum::FIRST);
+        canonical_ast::Graph::EdgeSequenceIterator cei;
+
+        for (cei = canSrcEdges.begin(); cei != canSrcEdges.end(); ++cei)
+        {
+            engSrcEdges.push_back(can_to_eng_edge_map[*cei]);
+        }
+
+        for (cei = canSinkEdges.begin(); cei != canSinkEdges.end(); ++cei)
+        {
+            engSinkEdges.push_back(can_to_eng_edge_map[*cei]);
+        }
+
+        e = transformCanNode(eng_graph, *cni, engSrcEdges, engSinkEdges, engNodes);
+        if ( e != NvDlaSuccess )
+        {
+            delete eng_graph; // blow up
+            eng_graph = NULL;
+            ORIGINATE_ERROR_FAIL(e, "Couldn't transform canonical node '%s' into engine node", (*cni)->id().c_str());
+        }
+
+        if ( eng_graph->debugGraphDump() )
+        {
+            gLogInfo << (*cni)->id() << ":->";
+            for (vector<engine_ast::Node *>::iterator ni = engNodes.begin(); ni != engNodes.end(); ++ni)
+            {
+                gLogInfo << (*ni)->id() << ":" << (*ni)->name() << " ";
+            }
+            gLogInfo << std::endl;
+        }
+    }
+
+    for ( vector<canonical_ast::Edge *>::const_iterator cie = can_graph->inputEdges().begin();
+            cie != can_graph->inputEdges().end(); ++cie)
+    {
+        engine_ast::Edge *first_edge = can_to_eng_edge_map[can_graph->inputEdges().front()];
+        engine_ast::Edge *input_edge = can_to_eng_edge_map[*cie];
+        input_edge->originalTensor()->setDataFormat(profile->networkInputDataFormat());
+
+        // Determine if multibatch parameters are consistent for all input tensors
+        if (first_edge->originalTensor()->getDimensions().n != input_edge->originalTensor()->getDimensions().n)
+        {
+            ORIGINATE_ERROR_FAIL(NvDlaError_BadValue, "Input tensor multibatch dimensions mismatch: %d != %d", first_edge->originalTensor()->getDimensions().n, input_edge->originalTensor()->getDimensions().n);
+        }
+
+        Dims4 networkDims = input_edge->originalTensor()->getDimensions();
+        if ( networkDims.n != (NvS32)profile->multiBatchSize() )
+        {
+            gLogWarning << "Overriding input multibatch size from " << networkDims.n << " to " << profile->multiBatchSize() << endl;
+            networkDims.n = profile->multiBatchSize();
+            input_edge->originalTensor()->setDimensions(networkDims);
+        }
+
+        // if it is IMG input format, ensure #chnls match between model and profile params
+        if ( profile->networkInputSurfaceFormat().category() == surface::SurfaceCategoryEnum::IMG &&
+             networkDims.c != profile->networkInputSurfaceFormat().channelsPerAtom())
+        {
+            gLogWarning << "Prototxt #chnls (C = "
+                        << networkDims.c
+                        << ") != Profile #chnls for input ("
+                        << profile->networkInputSurfaceFormat().c_str()
+                        << ": C = "
+                        << (int)profile->networkInputSurfaceFormat().channelsPerAtom()
+                        << "). Preferring #chnls from Profile for compiling."
+                        << endl;
+            networkDims.c = profile->networkInputSurfaceFormat().channelsPerAtom();
+            input_edge->originalTensor()->setDimensions(networkDims);
+
+            // copy the tensor scales and offsets to the extra channel if any
+            if (input_edge->originalTensor()->getChannelScales().size())
+            {
+                NvF32 tensorScale  = input_edge->originalTensor()->getChannelScales().at(0);
+                std::vector<NvF32> channelScales;
+                for (NvU32 cc = 0; cc < (NvU32)networkDims.c; ++cc)
+                {
+                    channelScales.push_back(tensorScale);
+                }
+                input_edge->originalTensor()->setChannelScales(channelScales);
+            }
+
+            if (input_edge->originalTensor()->getChannelOffsets().size())
+            {
+                NvF32 tensorOffset = input_edge->originalTensor()->getChannelOffsets().at(0);
+                std::vector<NvF32> channelOffsets;
+                for (NvU32 cc = 0; cc < (NvU32)networkDims.c; ++cc)
+                {
+                    channelOffsets.push_back(tensorOffset);
+                }
+                input_edge->originalTensor()->setChannelOffsets(channelOffsets);
+            }
+        }
+
+        input_edge->setBindId(input_edges.size(), IOD_Input);
+        if ( eng_graph->debugBinding() )
+        {
+            gLogInfo << "EngineAST graph level input edge[" << input_edges.size() << "] is " << input_edge->id() << endl;
+            gLogInfo << "input bind id: " << input_edge->bindId() << endl;
+        }
+
+        input_edges.push_back( input_edge );
+    };
+
+    if ( input_edges.size() )
+    {
+        eng_graph->setInputEdges(input_edges);
+    }
+
+
+    for ( vector<canonical_ast::Edge *>::const_iterator coe = can_graph->outputEdges().begin();
+            coe != can_graph->outputEdges().end(); ++coe)
+    {
+        engine_ast::Edge *output_edge = can_to_eng_edge_map[*coe];
+        output_edge->originalTensor()->setDataFormat(profile->networkOutputDataFormat());
+
+        Dims4 networkDims = output_edge->originalTensor()->getDimensions();
+        if ( networkDims.n != (NvS32)profile->multiBatchSize() )
+        {
+            gLogWarning << "Overriding output multibatch size from " << networkDims.n << " to " << profile->multiBatchSize() << endl;
+            networkDims.n = profile->multiBatchSize();
+            output_edge->originalTensor()->setDimensions(networkDims);
+        }
+
+        output_edge->setBindId(output_edges.size(), IOD_Output);
+        if ( eng_graph->debugBinding() )
+        {
+            gLogInfo << "EngineAST graph level output edge[" << output_edges.size() << "] is " << output_edge->id() << endl;
+            gLogInfo << "output bind id: " << output_edge->bindId() << endl;
+        }
+
+        output_edges.push_back( output_edge );
+    };
+
+    if ( output_edges.size() )
+    {
+        eng_graph->setOutputEdges(output_edges);
+    }
+
+    // cache input/output/aux edges of each node into their respective data ports
+    if ( eng_graph->debugGraphDump() )
+    {
+        engine_ast::Graph::NodeSet engineNodes = eng_graph->nodes();
+        engine_ast::Graph::NodeSetIterator eni = engineNodes.begin();
+        for ( ; eni != engineNodes.end(); ++eni)
+        {
+            typedef std::vector<Edge*>::const_iterator ESI;
+
+            std::string canNodeName;
+            if ((*eni)->canonicalNode() == NULL)
+            {
+                canNodeName = "(No canonical node)";
+            }
+            else
+            {
+                canNodeName = (*eni)->canonicalNode()->name();
+            }
+            gLogInfo << (*eni)->name() << "/" << (*eni)->id() << "/"
+                     << canNodeName << ":" << endl;
+            for (ESI ii = (*eni)->inputEdges().begin(); ii != (*eni)->inputEdges().end(); ++ii)
+                gLogInfo << "\tin " << (*ii)->id() << endl;
+            for (ESI ii = (*eni)->outputEdges().begin(); ii != (*eni)->outputEdges().end(); ++ii)
+                gLogInfo << "\tout " << (*ii)->id() << endl;
+            for (ESI ii = (*eni)->auxEdges().begin(); ii != (*eni)->auxEdges().end(); ++ii)
+                gLogInfo << "\taux " << (*ii)->id() << endl;
+        }
+    }
+
+    eng_graph->ordering()->generate();
+    eng_graph->markClean();
+
+    // force N = 1 for all non-Aux tensors represented by non-bindable edges;
+    // until we allow contiguous non-bindable tensors for multi-batch
+    {
+        engine_ast::Graph::EdgeSequence engineEdges = eng_graph->orderedEdges();
+        for (engine_ast::Graph::EdgeSequenceIterator eei = engineEdges.begin(); eei != engineEdges.end(); ++eei)
+        {
+            if (!(*eei)->bindable() && !(*eei)->isAuxEdge() && (*eei)->originalTensor())
+            {
+                Dims4 nonBindableTensorDims = (*eei)->originalTensor()->getDimensions();
+                if ( eng_graph->debugGraphDump() )
+                {
+                    if (nonBindableTensorDims.n != 1)
+                        gLogInfo << "Forcing batch size '1' for non-bindable non-aux edge " << (*eei)->id() << endl;
+                }
+                nonBindableTensorDims.n = 1;
+                (*eei)->originalTensor()->setDimensions(nonBindableTensorDims);
+            }
+        }
+    }
+    return eng_graph;
+
+fail:
+    return NULL;
+}
+```
+
+
+
 ### 4.3.6.代码流程分析-EngineAST中间IR变换与优化PASS
 
 ### 4.3.7.代码流程分析-EngineAST到后端代码Emit（代码生成）
