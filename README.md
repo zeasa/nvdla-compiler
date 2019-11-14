@@ -153,6 +153,106 @@ layer {
 
 从这个例子可以看出，同大多框架的网络模型定义相似，网络定义都是以layer为主，顺序定义，语法为JSON。每层包括了name，type和param等参数，其中layer的type以及每种type的layer的参数在caffe框架的定义文件里有详细的描述。上面这个例子只截取了一个LeNet5网络的前3层，分别是Input、conv1、pooling等。
 
+​	caffemodel文件是训练后带有网络权重信息的模型文件，使用的是google的protobuf格式二进制存储，使用caffemodel2json工具可以将其解析为json格式以便查看，下面是对应上述prototxt文件lenet5网络的json结果的一部分：
+
+```js
+dump
+{
+  "name": "LeNet",
+  "layer": [ 
+    { #这一层是LeNet的输入层
+      "name": "mnist",
+      "type": "Data",
+      "top": [
+        "data",
+        "label"
+      ],
+      "include": [
+        {
+          "phase": 0 #表明当前层只有TRAIN阶段才包含进来
+        }
+      ],
+      "phase": 0, #训练或者测试阶段 TRAIN=0, TEST=1
+      "transform_param": {
+        "scale": 0.00390625
+      },
+      "data_param": {
+        "source": "examples/mnist/mnist_train_lmdb",
+        "batch_size": 64,
+        "backend": 1
+      }
+    },
+    { #这一层是LeNet紧接着输入层的第一个conv层
+      "name": "conv1",
+      "type": "Convolution",
+      "bottom": [
+        "data"
+      ],
+      "top": [
+        "conv1"
+      ],
+      "param": [
+        {
+          "lr_mult": 1.0 #weight的学习率
+        },
+        {
+          "lr_mult": 2.0 #bias的学习率
+        }
+      ],
+      "blobs": [ #这里的blobs存储的是这一层的卷积kernel的weight和bias信息
+        { #blobs[0]应该是weight权重，从shape看出有20个kernel，每个5*5*1
+          "data": [
+            0.17512507736682892,
+            0.20436875522136688,
+            0.056398797780275345,
+            0.005825345404446125,
+            0.23611973226070404,
+            "(495 elements more)"
+          ],
+          "shape": {
+            "dim": [
+              20, #N
+              1,  #C
+              5,  #H
+              5   #W
+            ]
+          }
+        },
+        { #blobs[1]应该是bias值，shape是20
+          "data": [
+            -0.05203453078866005,
+            -0.26182013750076294,
+            -0.1220993623137474,
+            -0.07315845042467117,
+            0.002272228477522731,
+            "(15 elements more)"
+          ],
+          "shape": {
+            "dim": [
+              20
+            ]
+          }
+        }
+      ],
+      "phase": 0,
+      "convolution_param": {
+        "num_output": 20,
+        "kernel_size": [
+          5
+        ],
+        "stride": [
+          1
+        ],
+        "weight_filler": {
+          "type": "xavier"  #权值初始化方法
+        },
+        "bias_filler": {
+          "type": "constant" #权值初始化方法
+        }
+      }
+    },
+```
+
 ​	接下来compiler会对prototxt定义的网络模型进行解析，生成内部的CanonicalAST数据结构，这部分在compiler目录下的AST.cpp和CanonicalAST.cpp两个文件里进行实现。但CanonicalAST只是一种过渡的表示，下面紧接着会执行从CanonicalAST到EngineAST的变换，后续的所有AST变换与优化都是针对于EngineAST进行的，感觉这个AST才是整个nvdla编译框架的中间IR表示。
 
 ​	EngineAST生成之后，compiler会对这个中间表示做各种变换与优化，这一步的结果就是要得到一个适合后端代码生成的AST表示。
