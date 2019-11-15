@@ -1893,7 +1893,7 @@ static NvDlaError transformCanConvOp
     engSinkEdge    = engSinkEdges[0];//实际上engSinkEdge[]数组也只有一个元素
     //canNode转换为canConvNode
     canConvNode    = canonical_ast::NodeFactory::nodeCast<canonical_ast::ConvolutionNode*>(canNode);
-    //根据canConvNode构造engConvNode
+    //根据canConvNode构造engConvNode<这条语句后面单独解析>
     engConvNode    = engine_ast::NodeFactory::newConvCoreConvolutionOpNode(canConvNode, engGraph);
     //adjointSDPNode是由engConvNode根据canConvNode创建的，创建完毕直接和engConvNode进行关联
     adjointSDPNode = engConvNode->addSDPJointOpNode(canConvNode);
@@ -1961,11 +1961,9 @@ NvDlaError engine_ast::Node::populateEdgePorts()
     EdgeSequence inputEdges = graph()->upstreamDataEdges(this);
     EdgeSequence outputEdges = graph()->downstreamDataEdges(this);
 
-    /**
-     * should be min 1 upstream edge;
-     * if only 1 upstream edge, it should be the data input
-     * if >1 upstream edges, find input and/or aux edges
-     */
+    //should be min 1 upstream edge;
+    //if only 1 upstream edge, it should be the data input
+    //if >1 upstream edges, find input and/or aux edges
     if (inputEdges.size() == 0)
         ORIGINATE_ERROR_FAIL(NvDlaError_BadValue, "%s has 0 input edges", name().c_str());
     else if (inputEdges.size() == 1)//如果当前node只有一个inputEdge则标记为InputEdge
@@ -1982,11 +1980,9 @@ NvDlaError engine_ast::Node::populateEdgePorts()
         }
     }
 
-    /**
-     * should be exactly only 1 output edge, it should be the data output,
-     * none of the engine nodes is capable of >1 outputs, fail if so since
-     * concat and split nodes are handled separately
-     */
+    //* should be exactly only 1 output edge, it should be the data output,
+    // * none of the engine nodes is capable of >1 outputs, fail if so since
+    // * concat and split nodes are handled separately
     //所有的engnode都只能有一个outputEdge，concat或者split操作单独处理
     if (outputEdges.size() == 0)
         ORIGINATE_ERROR_FAIL(NvDlaError_BadValue, "%s has 0 output edges", name().c_str());
@@ -1997,6 +1993,84 @@ NvDlaError engine_ast::Node::populateEdgePorts()
 
     PROPAGATE_ERROR_FAIL( verifyEdgePorts() );
 fail:
+    return e;
+}
+
+//这个函数完成的是从canNode来创建engConvNode的功能
+engine_ast::ConvCoreConvolutionOpNode* engine_ast::NodeFactory::newConvCoreConvolutionOpNode
+(
+    canonical_ast::ConvolutionNode* origCanNode,
+    engine_ast::Graph* engGraph
+)
+{
+    typedef typename engine_ast::Node* B;
+    typedef typename engine_ast::ConvCoreConvolutionOpNode* DD;
+
+    B b;
+    DD dd;
+    NvU16 numBatches = engGraph->profile()->multiBatchSize();
+
+    //建立engConv节点
+    b = dd = new engine_ast::ConvCoreConvolutionOpNode(origCanNode, numBatches);
+    dd->setId(engGraph->nextNodeId());//节点Id=n-0,n-1
+    dd->setGraph(engGraph);//node的container指向graph
+    //根据canNode的属性填充当前engNode的属性
+    dd->captureCanonicalParams();
+    engGraph->insertNode(b);//把当前建立的节点加入Graph的node列表中
+
+    // determine op mode for the conv op: DC / WINOGRAD
+    WeightTrns::WeightDims weightDims (dd->params().rawWeights().count,
+                                       dd->params().weightDims().n,
+                                       dd->params().weightDims().c,
+                                       dd->params().weightDims().w,
+                                       dd->params().weightDims().h,
+                                       dd->params().stride().w,
+                                       dd->params().stride().h);
+    // fixme: disable winograd with group conv since group conv tends to bloat weight size
+    // by a factor of 'inputC / auxC' which can be arbitrarily large to fit in CBUFF
+    bool canWG          = engGraph->profile()->canWinograd();
+    bool isWGPossible   = WeightTrns::isWGPossible(weightDims);
+    bool isGroupConv    = dd->params().numGroups() > 1;
+    bool isDilation     = dd->params().dilation() != Dims2(1,1);
+    bool isInt8         = engGraph->profile()->computePrecision().v() ==
+                          surface::SurfacePrecisionEnum::NVDLA_PRECISION_INT8;
+    if ( canWG && isWGPossible && !isGroupConv && !isDilation && !isInt8 )
+    {
+        dd->setName(std::string("wg-conv-") + toString(s_conv_conv_priv.size()));
+        dd->params().setConvMode(engine_ast::ConvolutionModeEnum::CONV_WINOGRAD);
+    }
+    else
+    {
+        dd->setName(std::string("dc-conv-") + toString(s_conv_conv_priv.size()));
+        dd->params().setConvMode(engine_ast::ConvolutionModeEnum::CONV_DIRECT);
+    }
+
+    s_conv_conv_priv.insert(std::pair<B, DD>(b, dd));
+    return dd;
+}
+//从canNode拷贝Node的属性到engNode
+void engine_ast::ConvCoreConvolutionOpNode::captureCanonicalParams()
+{
+    params().setHasBiasTerm(canonicalNode()->params().hasBiasTerm() == true ? 1 : 0);
+    params().setWeightDims(canonicalNode()->params().weightDims());
+    params().setTopLeftPadding(canonicalNode()->params().topLeftPadding());
+    params().setBottomRightPadding(canonicalNode()->params().bottomRightPadding());
+    params().setPaddingValue(canonicalNode()->params().paddingValue());
+    params().setStride(canonicalNode()->params().stride());
+    params().setDilation(canonicalNode()->params().dilation());
+    params().setRawWeights(canonicalNode()->params().weights());
+    params().setDLAWeights(Weights(DataType::FLOAT, NULL, 0));
+    params().setNumGroups(canonicalNode()->params().numGroups());
+    captureCanonicalWeights();
+}
+//为engNode建立Weight的tensor和edge
+NvDlaError engine_ast::ConvCoreNode::captureCanonicalWeights()
+{
+    NvDlaError e = NvDlaSuccess;
+    Tensor* wt_tensor;
+    wt_tensor = graph()->addAuxTensor(graph()->newAuxTensorName(), params().weightDims(), TensorType::kWEIGHT);
+    Edge* aux = graph()->addDataEdge((canonical_ast::Edge*)0, 0, this, wt_tensor);
+    NVDLA_UNUSED(aux);
     return e;
 }
 ```
