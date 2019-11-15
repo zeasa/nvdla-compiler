@@ -1517,7 +1517,7 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
     eng_graph->setOrdering(new DependencyOrdering(eng_graph->scoredOrdering()));
 
     // create edges to mirror the canonical edges.
-    // 迭代所有can_graph的edges
+    // 迭代所有can_graph的edges，建立相应的engine_edge,并把两者关联加入MAP
     for ( set<canonical_ast::Edge *>::iterator cei = can_graph->edges().begin(), CEI = can_graph->edges().end();
           cei != CEI; ++cei )
     {
@@ -1541,7 +1541,6 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
         engine_edge->setOriginalTensor(engine_tensor);//指定edge关联的tensor
         can_to_eng_edge_map[*cei] = engine_edge;//建立can_edge和engine_edge的关联MAP
         eng_graph->insertEdge(engine_edge);//把engine_edge加入eng_graph的edge列表
-
     }
 
     //如果没有指定multibatchsize，则根据network的input tensor的n指定推导multibatchsize
@@ -1571,8 +1570,8 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
         engine_ast::Graph::EdgeSequence engSrcEdges;//engine_graph的SrcEdges
         engine_ast::Graph::EdgeSequence engSinkEdges;//engine_graph的SinkEdges
         engine_ast::Graph::NodeSequence engNodes;//engine_graph的Nodes
-        canonical_ast::Graph::EdgeSequence canSrcEdges = can_graph->nodeEdges(*cni, ast::EdgeSideEnum::SECOND);//can_graph的所有node的inputedge的总和
-        canonical_ast::Graph::EdgeSequence canSinkEdges = can_graph->nodeEdges(*cni, ast::EdgeSideEnum::FIRST);//can_graph的所有node的outputedge的总和
+        canonical_ast::Graph::EdgeSequence canSrcEdges = can_graph->nodeEdges(*cni, ast::EdgeSideEnum::SECOND);//can_graph的当前node的inputedge的总和
+        canonical_ast::Graph::EdgeSequence canSinkEdges = can_graph->nodeEdges(*cni, ast::EdgeSideEnum::FIRST);//can_graph的当前node的outputedge的总和
         canonical_ast::Graph::EdgeSequenceIterator cei;
 		//找出所有canSrcEdges对应的engine_edge,放入engSrcEdges列表
         for (cei = canSrcEdges.begin(); cei != canSrcEdges.end(); ++cei)
@@ -1585,40 +1584,58 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
             engSinkEdges.push_back(can_to_eng_edge_map[*cei]);
         }
 		
-        //从can_node变化eng_node???
+        //从当前的can_node转化出eng_nodes，之所以是end_nodes是因为一个can_node可以对应2，3个eng_nodes
+        //转换完毕是否把结果的engNodes挂在eng_graph上？？？需要详细看transformCanNode()函数代码
         e = transformCanNode(eng_graph, *cni, engSrcEdges, engSinkEdges, engNodes);
         if ( e != NvDlaSuccess )
         {
             delete eng_graph; // blow up
             eng_graph = NULL;
-            ORIGINATE_ERROR_FAIL(e, "Couldn't transform canonical node '%s' into engine node", (*cni)->id().c_str());
+            ORIGINATE_ERROR_FAIL(e, "Couldn't transform canonical node '%s' into engine node", 										(*cni)->id().c_str());
         }
-
+		
+        //n-0:->n-0:dc-conv-0 n-1:bias-0 
+        //n-1:->n-2:pdp-0 
+        //n-2:->n-3:dc-conv-1 n-4:bias-1 
+        //n-3:->n-5:pdp-1 
+        //n-4:->n-6:fc-0 n-7:bias-2 
+        //n-5:->n-8:sdp-scale-0 n-9:act-0 
+        //n-6:->n-10:fc-1 n-11:bias-3 
+        //n-7:->n-12:cpu-sm-0 
+        //上面列出的就是transformCanNode()函数的转换结果，可以看到1个can_node有可能转换成2个eng_node
+        //是因为can_node是直接对那个network模型的node，而在engine中，一个network模型中的node有可能是
+        //需要2个engine前后协同计算才能得到结果，所有这里的eng_node其实已经是映射到硬件上的node了
         if ( eng_graph->debugGraphDump() )
         {
             gLogInfo << (*cni)->id() << ":->";
-            for (vector<engine_ast::Node *>::iterator ni = engNodes.begin(); ni != engNodes.end(); ++ni)
+            for (vector<engine_ast::Node *>::iterator ni=engNodes.begin(); ni!=engNodes.end(); ++ni)
             {
                 gLogInfo << (*ni)->id() << ":" << (*ni)->name() << " ";
             }
             gLogInfo << std::endl;
         }
     }
-
+	
+    //迭代can_graph的所有inputEdges
     for ( vector<canonical_ast::Edge *>::const_iterator cie = can_graph->inputEdges().begin();
             cie != can_graph->inputEdges().end(); ++cie)
     {
+        //找出can_graph的首个inputEdge对应的eng_edge
         engine_ast::Edge *first_edge = can_to_eng_edge_map[can_graph->inputEdges().front()];
+        //当前迭代的can_edge对应的eng_edge
         engine_ast::Edge *input_edge = can_to_eng_edge_map[*cie];
+        //当前eng_edge对应的tensor格式设定为profile指定的InputDataFormat
         input_edge->originalTensor()->setDataFormat(profile->networkInputDataFormat());
 
-        // Determine if multibatch parameters are consistent for all input tensors
-        if (first_edge->originalTensor()->getDimensions().n != input_edge->originalTensor()->getDimensions().n)
+        // 要求所有的inputedge的multibatch参数n必须一致
+        if (first_edge->originalTensor()->getDimensions().n != input_edge->originalTensor()-> getDimensions().n)
         {
             ORIGINATE_ERROR_FAIL(NvDlaError_BadValue, "Input tensor multibatch dimensions mismatch: %d != %d", first_edge->originalTensor()->getDimensions().n, input_edge->originalTensor()->getDimensions().n);
         }
 
         Dims4 networkDims = input_edge->originalTensor()->getDimensions();
+        //拿所有inputedge的multibatch参数n和profile指定的multibatch参数进行比较，如果不一致
+        //则以profile指定的参数为准，并把inputedge中的tensor变量的networkDims.n更新为profile指定的值
         if ( networkDims.n != (NvS32)profile->multiBatchSize() )
         {
             gLogWarning << "Overriding input multibatch size from " << networkDims.n << " to " << profile->multiBatchSize() << endl;
@@ -1626,7 +1643,9 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
             input_edge->originalTensor()->setDimensions(networkDims);
         }
 
-        // if it is IMG input format, ensure #chnls match between model and profile params
+        // 如果profile指定的输入IMG tensor的channel数与network提供的networkDims.c不一致
+        // 则以profile设定的input tensor的channel值为准，同时更新engine_graph的inputedge对应的tensor
+        // 的networkDims.c的值
         if ( profile->networkInputSurfaceFormat().category() == surface::SurfaceCategoryEnum::IMG &&
              networkDims.c != profile->networkInputSurfaceFormat().channelsPerAtom())
         {
@@ -1642,6 +1661,11 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
             input_edge->originalTensor()->setDimensions(networkDims);
 
             // copy the tensor scales and offsets to the extra channel if any
+            // transform_param {
+            // scale: 0.00390625
+            // mean_value: 128
+            // }
+            // input tensor的scale
             if (input_edge->originalTensor()->getChannelScales().size())
             {
                 NvF32 tensorScale  = input_edge->originalTensor()->getChannelScales().at(0);
@@ -1652,7 +1676,7 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
                 }
                 input_edge->originalTensor()->setChannelScales(channelScales);
             }
-
+		   // input tensor的offset(mean_value)
             if (input_edge->originalTensor()->getChannelOffsets().size())
             {
                 NvF32 tensorOffset = input_edge->originalTensor()->getChannelOffsets().at(0);
@@ -1664,23 +1688,25 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
                 input_edge->originalTensor()->setChannelOffsets(channelOffsets);
             }
         }
-
+	    // 这个bindid好像只是整个图的input和output的edge才设定，这个函数只是设定两个变量而已
+        // m_bindDomain = bindDomain; m_bindId = id; bingDomain有input output debug三种
+        // 这个bindid也是随着inputedge的增加顺序往后排
         input_edge->setBindId(input_edges.size(), IOD_Input);
         if ( eng_graph->debugBinding() )
         {
-            gLogInfo << "EngineAST graph level input edge[" << input_edges.size() << "] is " << input_edge->id() << endl;
+            gLogInfo << "EngineAST graph level input edge[" << input_edges.size() << "] is " <<                             input_edge->id() << endl;
             gLogInfo << "input bind id: " << input_edge->bindId() << endl;
         }
-
         input_edges.push_back( input_edge );
     };
-
+	
+    // 设定整个eng_graph的inputedge列表为input_edges
     if ( input_edges.size() )
     {
         eng_graph->setInputEdges(input_edges);
     }
 
-
+	//按照以上处理inputedge的方法，处理所有的outputedges
     for ( vector<canonical_ast::Edge *>::const_iterator coe = can_graph->outputEdges().begin();
             coe != can_graph->outputEdges().end(); ++coe)
     {
@@ -1698,19 +1724,28 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
         output_edge->setBindId(output_edges.size(), IOD_Output);
         if ( eng_graph->debugBinding() )
         {
-            gLogInfo << "EngineAST graph level output edge[" << output_edges.size() << "] is " << output_edge->id() << endl;
+            gLogInfo << "EngineAST graph level output edge[" << output_edges.size() << "] is " <<                            output_edge->id() << endl;
             gLogInfo << "output bind id: " << output_edge->bindId() << endl;
         }
-
         output_edges.push_back( output_edge );
     };
-
+	
+    //设定整个eng_graph的outputedge列表为output_edges
     if ( output_edges.size() )
     {
         eng_graph->setOutputEdges(output_edges);
     }
 
-    // cache input/output/aux edges of each node into their respective data ports
+    // 打印所有eng_node的name，编号，以及对应的can_node的name
+    // 同时打印每个eng_node的所有input output aux类型的edge
+    //libnvdla<3> dc-conv-0/n-0/conv1:
+	//libnvdla<3> 	in e-0
+	//libnvdla<3> 	out e-11
+	//libnvdla<3> 	aux e-9
+	//libnvdla<3> bias-0/n-1/conv1:
+	//libnvdla<3> 	in e-11
+	//libnvdla<3> 	out e-1
+	//libnvdla<3> 	aux e-10
     if ( eng_graph->debugGraphDump() )
     {
         engine_ast::Graph::NodeSet engineNodes = eng_graph->nodes();
@@ -1718,16 +1753,10 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
         for ( ; eni != engineNodes.end(); ++eni)
         {
             typedef std::vector<Edge*>::const_iterator ESI;
-
             std::string canNodeName;
-            if ((*eni)->canonicalNode() == NULL)
-            {
-                canNodeName = "(No canonical node)";
-            }
-            else
-            {
-                canNodeName = (*eni)->canonicalNode()->name();
-            }
+            if ((*eni)->canonicalNode() == NULL)  canNodeName = "(No canonical node)";
+            else canNodeName = (*eni)->canonicalNode()->name();
+            
             gLogInfo << (*eni)->name() << "/" << (*eni)->id() << "/"
                      << canNodeName << ":" << endl;
             for (ESI ii = (*eni)->inputEdges().begin(); ii != (*eni)->inputEdges().end(); ++ii)
@@ -1739,22 +1768,27 @@ engine_ast::Graph *engine_ast::generateGraph(Profile *profile, TargetConfig *tar
         }
     }
 
+    //对所有eng_node进行打分排序？？
     eng_graph->ordering()->generate();
     eng_graph->markClean();
 
     // force N = 1 for all non-Aux tensors represented by non-bindable edges;
     // until we allow contiguous non-bindable tensors for multi-batch
+    // Forcing batch size '1' for non-bindable non-aux edge "
     {
+        //迭代所有engine_edges
         engine_ast::Graph::EdgeSequence engineEdges = eng_graph->orderedEdges();
-        for (engine_ast::Graph::EdgeSequenceIterator eei = engineEdges.begin(); eei != engineEdges.end(); ++eei)
+        for (engine_ast::Graph::EdgeSequenceIterator eei = engineEdges.begin(); eei !=                            engineEdges.end(); ++eei)
         {
+            //非bindable，非auxedge，并且存在originalTensor
             if (!(*eei)->bindable() && !(*eei)->isAuxEdge() && (*eei)->originalTensor())
             {
+                //获取originalTensor的dimension
                 Dims4 nonBindableTensorDims = (*eei)->originalTensor()->getDimensions();
                 if ( eng_graph->debugGraphDump() )
                 {
                     if (nonBindableTensorDims.n != 1)
-                        gLogInfo << "Forcing batch size '1' for non-bindable non-aux edge " << (*eei)->id() << endl;
+                        gLogInfo << "Forcing batch size '1' for non-bindable non-aux edge " <<                                           (*eei)->id() << endl;
                 }
                 nonBindableTensorDims.n = 1;
                 (*eei)->originalTensor()->setDimensions(nonBindableTensorDims);
@@ -1768,7 +1802,9 @@ fail:
 }
 ```
 
+整个函数实现了canonical_graph到engine_graph的变换，用LeNet5作为例子，其具体映射关系可以用下图进行表示：
 
+![](https://github.com/zeasa/nvdla-compiler/raw/master/document/imgs/cangraph2enggraph.png)
 
 ### 4.3.6.代码流程分析-EngineAST中间IR变换与优化PASS
 
