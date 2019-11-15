@@ -1806,6 +1806,203 @@ fail:
 
 ![](https://github.com/zeasa/nvdla-compiler/raw/master/document/imgs/cangraph2enggraph.png)
 
+刚刚代码里提到了一个重要的函数engine_ast::transformCanNode()，从can_node到eng_node的转换工作都在这个函数中完成，这里来看看其代码：
+
+```c++
+NvDlaError engine_ast::transformCanNode
+(
+    engine_ast::Graph* engGraph,
+    canonical_ast::Node *canNode,
+    engine_ast::Graph::EdgeSequence engSrcEdges,
+    engine_ast::Graph::EdgeSequence engSinkEdges,
+    engine_ast::Graph::NodeSequence& transformedEngNodes
+)
+{
+    NvDlaError e = NvDlaSuccess;
+
+    switch (canNode->canonicalOpType().v())
+    {
+        case canonical_ast::CONVOLUTION:
+            PROPAGATE_ERROR_FAIL(transformCanConvOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        case canonical_ast::FULLY_CONNECTED:
+            PROPAGATE_ERROR_FAIL(transformCanFCOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        case canonical_ast::ACTIVATION:
+            PROPAGATE_ERROR_FAIL(transformCanActOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        case canonical_ast::POOLING:
+            PROPAGATE_ERROR_FAIL(transformCanPoolingOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        case canonical_ast::LRN:
+            PROPAGATE_ERROR_FAIL(transformCanLRNOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        case canonical_ast::SCALE:
+            PROPAGATE_ERROR_FAIL(transformCanScaleOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        case canonical_ast::BATCH_NORM:
+            PROPAGATE_ERROR_FAIL(transformCanBNOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        case canonical_ast::SOFTMAX:
+            PROPAGATE_ERROR_FAIL(transformCanSoftMaxOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        case canonical_ast::DECONVOLUTION:
+            PROPAGATE_ERROR_FAIL(transformCanDeconvOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        case canonical_ast::CONCATENATION:
+            PROPAGATE_ERROR_FAIL(transformCanConcatOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        case canonical_ast::ELEMENTWISE:
+            PROPAGATE_ERROR_FAIL(transformCanEWOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        case canonical_ast::SPLIT:
+            PROPAGATE_ERROR_FAIL(transformCanSplitOp(engGraph, canNode, engSrcEdges, engSinkEdges, transformedEngNodes)); break;
+        default:
+             ORIGINATE_ERROR_FAIL(NvDlaError_BadParameter, "Unexpected canonical node '%s' of type '%s' ", canNode->id().c_str(), canNode->canonicalOpType().c_str());
+    }
+fail:
+    return e;
+}
+```
+
+可以看到，他的输入是一个can_node，输出是一个或多个eng_node，之所以可能是多个就是应为刚刚提到的network中的一层操作有可能是分配给多个不同功能的dla引擎共同完成的，例如一个conv操作，其中的bias部分就不是dla的conv引擎的工作，而是分配给了SDP引擎来完成，所以在engine_graph这个层次的图中就要把这种操作表示成两个node。上述函数根据can_node的类型，分别调用了不同的转换函数来完成转换，我们挑其中一个来说明其大致思路。
+
+```c++
+//transformCanConvOp完成conv类型的canNode到engNode的转换操作
+static NvDlaError transformCanConvOp
+(
+    engine_ast::Graph* engGraph,
+    canonical_ast::Node *canNode,//输入是一个canNode
+    engine_ast::Graph::EdgeSequence engSrcEdges,
+    engine_ast::Graph::EdgeSequence engSinkEdges,
+    engine_ast::Graph::NodeSequence& transformedEngNodes//输出是一个或多个engNodes
+)
+{
+    NvDlaError e = NvDlaSuccess;
+    bool isWG = false;
+    bool isInputBindable  = false;
+    bool isOutputBindable = false;
+    canonical_ast::ConvolutionNode* canConvNode        = NULL;
+    engine_ast::ConvCoreNode* engConvNode              = NULL;
+    engine_ast::SDPNode* adjointSDPNode                = NULL;
+    engine_ast::Edge* engSrcEdge                       = NULL;
+    engine_ast::Edge* engSinkEdge                      = NULL;
+    engine_ast::Edge* convAuxEdge                      = NULL;
+    engine_ast::Edge* sdpAuxEdge                       = NULL;
+    //获取canNode所在的can_graph的所有inputEdges
+    canonical_ast::Graph::EdgeSequence canInputEdges   = canNode->graph()->inputEdges();
+    //获取canNode所在的can_graph的所有outputEdges
+    canonical_ast::Graph::EdgeSequence canOutputEdges  = canNode->graph()->outputEdges();
+	
+    //转换操作只支持conv的输入输出edge都是1的类型
+    if (engSrcEdges.size() != 1 || engSinkEdges.size() != 1)
+    {
+        ORIGINATE_ERROR_FAIL(NvDlaError_NotSupported, "Don't support Conv operation with input edges (%d) != 1 or " "output edges (%d) != 1", engSrcEdges.size(), engSinkEdges.size());
+    }
+
+    engSrcEdge     = engSrcEdges[0];//实际上engSrcEdges[]数组也只有一个元素
+    engSinkEdge    = engSinkEdges[0];//实际上engSinkEdge[]数组也只有一个元素
+    //canNode转换为canConvNode
+    canConvNode    = canonical_ast::NodeFactory::nodeCast<canonical_ast::ConvolutionNode*>(canNode);
+    //根据canConvNode构造engConvNode
+    engConvNode    = engine_ast::NodeFactory::newConvCoreConvolutionOpNode(canConvNode, engGraph);
+    //adjointSDPNode是由engConvNode根据canConvNode创建的，创建完毕直接和engConvNode进行关联
+    adjointSDPNode = engConvNode->addSDPJointOpNode(canConvNode);
+    //设定adjointSDPNode工作模式，因为SDP引擎功能较多
+    adjointSDPNode->params().setConvMode(engConvNode->params().convMode());
+
+    ASSERT( canNode->inputEdges().size() == 1 );
+    ASSERT( canNode->outputEdges().size() == 1 );
+	
+    //判断当前要转换的节点的输入edge是否是整个graph的输入edge
+    isInputBindable  = std::find(canInputEdges.begin(), canInputEdges.end(), canNode->inputEdges().at(0)) != canInputEdges.end();
+    //判断当前要转换的节点的输出edge是否是整个graph的输出edge
+    isOutputBindable = std::find(canOutputEdges.begin(), canOutputEdges.end(), canNode->outputEdges().at(0)) != canOutputEdges.end();
+    //判断engConvNode的conv模式是否是WINOGRAD
+    isWG = engConvNode->params().convMode() == engine_ast::ConvolutionModeEnum::CONV_WINOGRAD;
+	
+    //WINOGRAD模式的conv操作不适合作为系统的输入或者输出节点
+    if (isWG && (isInputBindable || isOutputBindable))
+    {
+        gLogWarning << "Can't use WG mode with bindable surfaces. Falling back to CONV_DIRECT for "
+                    << engConvNode->name() << endl;
+        isWG = false;
+        engConvNode->setName("dc-conv-" + engConvNode->name().substr(engConvNode->name().find("wg-conv-") + 8));
+        engConvNode->params().setConvMode(engine_ast::ConvolutionModeEnum::CONV_DIRECT);
+        adjointSDPNode->params().setConvMode(engine_ast::ConvolutionModeEnum::CONV_DIRECT);
+    }
+	
+    //把engSrcEdge连接到刚刚创建的engConvNode的输入edge侧
+    engGraph->appendNodeToEdge(engSrcEdge, ast::EdgeSideEnum::SECOND, engConvNode);
+    //把engSinkEdge连接到刚刚创建的adjointSDPNode的输出edge侧
+    engGraph->appendNodeToEdge(engSinkEdge, ast::EdgeSideEnum::FIRST, adjointSDPNode);
+    
+	//为engConvNode创建并关联auxEdge，这个auxEdge用来向conv节点输入weight数据
+    PROPAGATE_ERROR_FAIL(engConvNode->nodeAuxEdge(&convAuxEdge));
+    //为adjointSDPNode创建并关联auxEdge，这个auxEdge用来向sdp节点输入bias数据
+    PROPAGATE_ERROR_FAIL(adjointSDPNode->nodeAuxEdge(&sdpAuxEdge));
+
+    PROPAGATE_ERROR_FAIL(engConvNode->populateEdgePorts());
+    transformedEngNodes.push_back(engConvNode);//把engConvNode加入函数返回node列表中
+
+    PROPAGATE_ERROR_FAIL(adjointSDPNode->populateEdgePorts());
+    transformedEngNodes.push_back(adjointSDPNode);//把adjointSDPNode加入函数返回node列表中
+
+    if (isWG)//Winograd参数
+    {
+        PROPAGATE_ERROR_FAIL(engConvNode->determineWinogradParams());
+        PROPAGATE_ERROR_FAIL(adjointSDPNode->determineWinogradParams(engConvNode));
+    }
+fail:
+    return e;
+}
+
+NvDlaError engine_ast::ConvCoreNode::nodeAuxEdge(engine_ast::Edge **ret_edge)
+{
+    NvDlaError e = NvDlaSuccess;
+    //可以看到conv节点的auxedge，其实也是一种dataEdge，只不过其type=WEIGHT，side=SECOND(输入)
+    PROPAGATE_ERROR_FAIL(nodeDataEdge(TensorType::kWEIGHT, ast::EdgeSideEnum::SECOND, ret_edge));
+fail:
+    return e;
+}
+NvDlaError engine_ast::Node::populateEdgePorts()
+{
+    NvDlaError e = NvDlaSuccess;
+	//找到当前node的上下游dataedge
+    EdgeSequence inputEdges = graph()->upstreamDataEdges(this);
+    EdgeSequence outputEdges = graph()->downstreamDataEdges(this);
+
+    /**
+     * should be min 1 upstream edge;
+     * if only 1 upstream edge, it should be the data input
+     * if >1 upstream edges, find input and/or aux edges
+     */
+    if (inputEdges.size() == 0)
+        ORIGINATE_ERROR_FAIL(NvDlaError_BadValue, "%s has 0 input edges", name().c_str());
+    else if (inputEdges.size() == 1)//如果当前node只有一个inputEdge则标记为InputEdge
+        markInputEdge(inputEdges[0]);
+    else
+    {
+        //当前node不止一个inputEdge，则根据是否是AuxEdge标记为InputEdge或者AuxEdge
+        for (EdgeSequenceIterator iei = inputEdges.begin(); iei != inputEdges.end(); ++iei)
+        {
+            if ((*iei)->isAuxEdge())
+                markAuxEdge(*iei);
+            else
+                markInputEdge(*iei);
+        }
+    }
+
+    /**
+     * should be exactly only 1 output edge, it should be the data output,
+     * none of the engine nodes is capable of >1 outputs, fail if so since
+     * concat and split nodes are handled separately
+     */
+    //所有的engnode都只能有一个outputEdge，concat或者split操作单独处理
+    if (outputEdges.size() == 0)
+        ORIGINATE_ERROR_FAIL(NvDlaError_BadValue, "%s has 0 output edges", name().c_str());
+    else if (outputEdges.size() == 1)
+        markOutputEdge(outputEdges[0]);
+    else
+        ORIGINATE_ERROR_FAIL(NvDlaError_BadValue, "%s has >1 output edges", name().c_str());
+
+    PROPAGATE_ERROR_FAIL( verifyEdgePorts() );
+fail:
+    return e;
+}
+```
+
+
+
 ### 4.3.6.代码流程分析-EngineAST中间IR变换与优化PASS
 
 ### 4.3.7.代码流程分析-EngineAST到后端代码Emit（代码生成）
