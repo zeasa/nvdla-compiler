@@ -41,60 +41,56 @@
   CMakeLists.txt:55 (find_package)
   ```
   原因是缺少Lua5.2相关脚本环境。$ sudo apt-get install liblua5.2即可。
-  ### 1.2.3使用docker直接使用完备的环境
+### 1.2.3使用docker直接使用完备的环境
 
-使用docker可以一步到位，避免搭建环境时各种不必要的错误。
+  ​使用docker可以一步到位，避免搭建环境时各种不必要的错误。
 
-1、安装docker
+  1. 安装docker
 
-2、从docker运行nvdla虚拟模拟器
+  2. 从docker运行nvdla虚拟模拟器
 
-```
-$ docker pull nvdla/vp
-*从dockerhub里下载nvdla/vp镜像*
+	```
+	$ docker pull nvdla/vp
+	*从dockerhub里下载nvdla/vp镜像*
 
-$ docker run -it -v /data1/wangyizhi/home:/home --name wyz_docker nvdla/vp 
-*运行一个docker，同时建立主机下/data1/wangyizhi/home文件夹到docker下/home的文件夹映射（双向映射），同时取名docker为wyz_docker*
+	$ docker run -it -v /data1/wangyizhi/home:/home --name wyz_docker nvdla/vp 
+	*运行一个docker，同时建立主机下/data1/wangyizhi/home文件夹到docker下/home的文件夹映射（双向映射），同时取名docker为wyz_docker*
 
-$ cd /usr/local/nvdla
+	$ cd /usr/local/nvdla
 
-$ aarch64_toplevel -c aarch64_nvdla.lua
-*运行lua脚本*
+	$ aarch64_toplevel -c aarch64_nvdla.lua
+	*运行lua脚本*
 
-Welcome to Buildroot
-nvdla login: root
-Password: nvdla
-*进入到nvdla虚拟模拟环境#命令行*
+	Welcome to Buildroot
+	nvdla login: root
+	Password: nvdla
+	*进入到nvdla虚拟模拟环境#命令行*
 
-# mount -t 9p -o trans=virtio r /mnt
-*mount挂载一下*
+	# mount -t 9p -o trans=virtio r /mnt
+	*mount挂载一下*
 
-# cd /mnt
+	# cd /mnt
 
-# ls
+	# ls
 
-Image            libnvdla_compiler.so
-LICENSE           libnvdla_runtime.so
-aarch64_nvdla.lua      **nvdla_compiler**
-aarch64_nvdla_dump_dts.lua **nvdla_runtime**
-drm.ko           opendla_1.ko
-efi-virtio.rom       opendla_2.ko
-init_dla.sh         rootfs.ext4
+	Image            libnvdla_compiler.so
+	LICENSE           libnvdla_runtime.so
+	aarch64_nvdla.lua      **nvdla_compiler**
+	aarch64_nvdla_dump_dts.lua **nvdla_runtime**
+	drm.ko           opendla_1.ko
+	efi-virtio.rom       opendla_2.ko
+	init_dla.sh         rootfs.ext4
 
-至此可以在此环境下对caffe网络进行编译和运行。
-```
+	至此可以在此环境下对caffe网络进行编译和运行。
+	```
 
-3、导入caffemodel和 prototxt  文件进行编译和仿真
-
-```
-# ./nvdla_compiler [-options] --prototxt <prototxt_file> --caffemodel <caffemodel_file> -o <outputpath>
-# ./nvdla_runtime --loadable <loadable_file> --image <image_file>
-```
-
-
-
-
-
+  3. 导入caffemodel和 prototxt  文件进行编译和仿真
+	
+	```
+	# ./nvdla_compiler [-options] --prototxt <prototxt_file> --caffemodel <caffemodel_file> -o <outputpath>
+	# ./nvdla_runtime --loadable <loadable_file> --image <image_file>
+	```
+	
 ## 1.3.软硬件分析文章参考 ##
 
 	https://github.com/JunningWu/Learning-NVDLA-Notes
