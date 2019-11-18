@@ -1,5 +1,4 @@
 # nvdla-compiler-learning #
-
 # 1.安装准备与一些有用的资源 #
 ## 1.1.github地址 ##
 	https://github.com/nvdla
@@ -90,6 +89,55 @@
 	# ./nvdla_compiler [-options] --prototxt <prototxt_file> --caffemodel <caffemodel_file> -o <outputpath>
 	# ./nvdla_runtime --loadable <loadable_file> --image <image_file>
 	```
+  4. 有个问题
+  
+	在docker的nvdla的vp下：
+	# ./nvdla_compiler -h
+	./nvdla_compiler: line 2: syntax error: unexpected redirection
+	# ./nvdla_compiler: line 1:ELF: not found
+	# ./nvdla_runtime -h
+	Usage: ./nvdla_runtime [-options] --loadable <loadable_file>
+	where options include:
+	    -h                    print this help message
+	    -s                    launch test in server mode
+	    --image <file>        input jpg/pgm file
+	    --normalize <value>   normalize value for input image
+	    --mean <value>        comma separated mean value for input image
+	    --rawdump             dump raw dimg data
+
+	在docker下：
+	root@b8db90f265c9:/usr/local/nvdla# ./nvdla_compiler -h
+	Usage: ./nvdla_compiler [-options] --prototxt <prototxt_file> --caffemodel <caffemodel_file>
+	where options include:
+	    -h                                                 print this help message
+	    -o <outputpath>                                    outputs wisdom files in 'outputpath' directory
+	    --profile <basic|default|performance|fast-math>    computation profile(fast-math by default)
+	    --cprecision <fp16|int8>                           compute precision(fp16 by default)
+	    --configtarget <nv_full|nv_large|nv_small>         target platform(opendla-full by default)
+	    --calibtable <int8 calib file>                     calibration table for INT8 networks
+	    --quantizationMode <per-kernel|per-filter>         quantization mode for INT8(per-kernel by default)
+
+	root@b8db90f265c9:/usr/local/nvdla# ./nvdla_runtime -h
+	bash: ./nvdla_runtime: cannot execute binary file: Exec format error
+	
+	可以发现nvdla_compiler和nvdla_runtime在两个环境下各有一个没法运行，使用fie查看其依赖环境。
+	file查看
+	
+	root@ac3852e4d38a:/usr/local/nvdla# file nvdla_compiler
+	nvdla_compiler: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), dynamically linked, 
+	interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 2.6.24, BuildID[sha1]=3e353cdcba7281d79d2dcc8c605a106b54fdf01f, 
+	not stripped
+
+	root@ac3852e4d38a:/usr/local/nvdla# file nvdla_runtime
+	nvdla_runtime: ELF 64-bit LSB executable, ARM aarch64, version 1 (GNU/Linux), dynamically linked, 
+	interpreter /lib/ld-linux-aarch64.so.1, for GNU/Linux 3.7.0, BuildID[sha1]=ee8c403968b2e61360ea8b2eef3c2c625fbff496, 
+	not stripped
+	
+	
+	结论：vp模拟目标板所以是arm64，于是基于arm64的runtime能运行；主机能运行基于x86的compiler。
+	compiler跑在pc上，交叉编译好之后runtime跑在目标板上即可。
+
+	查看nvdla/vp的docker tag, 1.4是最新的，vp里面已经没有compile了只有runtime.20191118
 	
 ## 1.3.软硬件分析文章参考 ##
 
